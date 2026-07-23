@@ -13,7 +13,10 @@
       "applications": [
         {
           "application": "kibana-.kibana",
-          "privileges": ["feature_securitySolutionCases.all"],
+          "privileges": [
+            "feature_securitySolutionCases.all",
+            "feature_siem.read"
+          ],
           "resources": ["*"]
         }
       ]
