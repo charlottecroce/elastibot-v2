@@ -46,6 +46,21 @@ Runs in **Socket Mode** by default (no public URL needed - good for an internal 
 - Keys are collected via a modal input, so they never appear in channel history.
 - Each user acts with their own Elastic API key, so case ownership/permissions reflect the real analyst. The watchers use a separate service key.
 
+## Creating API Keys
+
+In Kibana Dev Tools
+
+```
+POST /_security/api_key
+{
+  "name": "elastibot-charlotte.croce"
+}
+```
+
+And copy the base64 encoded value.
+
+Then edit the permissions JSON in Stack Management > Security > Api Keys. The permissions JSONs to use are in the api_permissions directory
+
 ## How the Elastic side works
 
 - **Alert lookup** - an `ids` query against `ALERTS_INDEX` (default
