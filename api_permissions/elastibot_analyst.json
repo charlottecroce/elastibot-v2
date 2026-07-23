@@ -7,7 +7,7 @@
             ".alerts-security.alerts-*",
             ".internal.alerts-security.alerts-*"
           ],
-          "privileges": ["read", "view_index_metadata"]
+          "privileges": ["read", "view_index_metadata", "write"]
         }
       ],
       "applications": [
