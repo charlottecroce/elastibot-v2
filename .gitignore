@@ -1,0 +1,17 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Local persistence
+data/
+*.state.json
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Logs / OS
+*.log
+.DS_Store
