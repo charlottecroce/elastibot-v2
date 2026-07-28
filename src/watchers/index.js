@@ -10,6 +10,10 @@ const { groupAlerts, encodeGroupValue } = require('../grouping');
  * the last run and post it to the routed Slack channel. Last-seen timestamps
  * are persisted so restarts don't replay or miss items.
  *
+ * On first run (no saved cursor) we start watching from "now" instead of
+ * backfilling history, so a fresh deploy doesn't flood the channel and trip
+ * Slack rate limits.
+ *
  * Alerts are grouped by user + host (within the grouping window) before posting,
  * so a burst of related alerts becomes ONE channel message with a single
  * "Create case" button rather than one message per alert.
@@ -20,12 +24,21 @@ const { groupAlerts, encodeGroupValue } = require('../grouping');
 const STATE_ALERTS = 'alertsLastTs';
 const STATE_CASES = 'casesLastTs'; // { [spaceId]: iso }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 function channelFor(spaceId) {
   return config.watchers.channelRouting[spaceId] || config.watchers.defaultChannel || '';
 }
 
 async function pollAlerts(client, state, spaceNameCache) {
   const since = state.get(STATE_ALERTS, null);
+
+  // First run: start from now, don't replay history
+  if (!since) {
+    state.set(STATE_ALERTS, new Date().toISOString());
+    return;
+  }
+
   let alerts;
   try {
     alerts = await serviceClient.getAlertsSince(since, config.watchers.fetchSize);
@@ -69,6 +82,7 @@ async function pollAlerts(client, state, spaceNameCache) {
           buttonValue: encodeGroupValue(group),
         }),
       });
+      await sleep(config.watchers.postDelayMs);
     } catch (err) {
       console.error('[watcher:alerts] post failed:', err.data?.error || err.message);
     }
@@ -95,16 +109,19 @@ async function pollCases(client, state, spaceNameCache) {
     }
 
     const since = cursors[spaceId] || null;
-    // Cases come newest-first; keep only ones newer than our cursor, then post oldest-first
-    const fresh = cases
-      .filter((c) => !since || new Date(c.created_at) > new Date(since))
-      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
-    if (!fresh.length) {
-      // Initialise cursor on first run so we don't backfill the whole history
-      if (!since && cases.length) cursors[spaceId] = cases[0].created_at;
+    // First run for this space: start from newest, don't backfill (cases are desc)
+    if (!since) {
+      cursors[spaceId] = cases.length ? cases[0].created_at : new Date().toISOString();
       continue;
     }
+
+    // Keep only cases newer than our cursor, then post oldest-first
+    const fresh = cases
+      .filter((c) => new Date(c.created_at) > new Date(since))
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+    if (!fresh.length) continue;
 
     let spaceName = spaceNameCache.get(spaceId);
     if (!spaceName) {
@@ -125,6 +142,7 @@ async function pollCases(client, state, spaceNameCache) {
             createdBy: c.created_by?.username || c.created_by?.full_name,
           }),
         });
+        await sleep(config.watchers.postDelayMs);
       } catch (err) {
         console.error(`[watcher:cases:${spaceId}] post failed:`, err.data?.error || err.message);
       }

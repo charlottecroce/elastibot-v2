@@ -73,6 +73,8 @@ module.exports = {
     // How many new alerts to pull per poll - keep above a plausible burst size so a
     // spike is grouped in one pass instead of split across polls
     fetchSize: int(process.env.WATCH_FETCH_SIZE, 200),
+    // Delay between channel posts within a tick, to stay under Slack rate limits
+    postDelayMs: int(process.env.WATCH_POST_DELAY_MS, 300),
 
     // ---------------------------------------------------------------
     // CHANNEL ROUTING
