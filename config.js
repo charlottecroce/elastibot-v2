@@ -57,8 +57,8 @@ module.exports = {
   grouping: {
     // Alerts from the same user + host (same space) within this window are treated
     // as one incident, collapsed into a single Slack message and, when a case is
-    // made, attached together. Default 2 minutes
-    windowMs: int(process.env.GROUP_WINDOW_MS, 120000),
+    // made, attached together. Default 1 hour
+    windowMs: int(process.env.GROUP_WINDOW_MS, 3600000),
     // Cap on how many alerts a single grouped case will pull in
     maxAlertsPerCase: int(process.env.GROUP_MAX_ALERTS, 200),
   },
