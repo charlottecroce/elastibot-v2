@@ -75,6 +75,9 @@ module.exports = {
     fetchSize: int(process.env.WATCH_FETCH_SIZE, 200),
     // Delay between channel posts within a tick, to stay under Slack rate limits
     postDelayMs: int(process.env.WATCH_POST_DELAY_MS, 300),
+    // How long an incident (space+user+host) stays "open" for in-place message
+    // updates before a later alert starts a fresh message. Default 10 minutes
+    incidentTtlMs: int(process.env.WATCH_INCIDENT_TTL_MS, 600000),
 
     // ---------------------------------------------------------------
     // CHANNEL ROUTING

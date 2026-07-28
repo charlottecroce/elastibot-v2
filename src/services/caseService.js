@@ -79,24 +79,31 @@ async function createCaseFromAlerts(client, alerts) {
     truncateRuleWords: config.naming.truncateRuleWords,
   });
 
+  const isGroup = alerts.length > 1;
   const times = alerts.map((a) => a.timestamp).filter(Boolean).sort();
   const rangeLine =
-    alerts.length > 1 && times.length
+    isGroup && times.length
       ? `\ntime range: \`${times[0]}\` — \`${times[times.length - 1]}\``
       : '';
   const ruleSummary = Object.entries(ruleCounts)
     .map(([n, c]) => `${n} ×${c}`)
     .join(', ');
 
+  // Single alert gets a plain description. only a real group mentions grouping
+  const description = isGroup
+    ? `Created via Elastibot from Slack - ${alerts.length} alerts grouped by user + host.\n\n` +
+      `user.name: \`${fmtField(repUser)}\`\n` +
+      `host.name: \`${fmtField(repHost)}\`\n\n` +
+      `alerts: ${ruleSummary}${rangeLine}`
+    : `Created via Elastibot from Slack for alert \`${alerts[0].id}\` (rule: ${representativeRule}).\n\n` +
+      `user.name: \`${fmtField(repUser)}\`\n` +
+      `host.name: \`${fmtField(repHost)}\``;
+
   let created;
   try {
     created = await client.createCase(spaceId, {
       title,
-      description:
-        `Created via Elastibot from Slack — ${alerts.length} alert(s) grouped by user + host.\n\n` +
-        `user.name: \`${fmtField(repUser)}\`\n` +
-        `host.name: \`${fmtField(repHost)}\`\n\n` +
-        `alerts: ${ruleSummary}${rangeLine}`,
+      description,
       tags: ['elastibot', monthYearTag()],
       connector: { id: 'none', name: 'none', type: '.none', fields: null },
       settings: { syncAlerts: true },
@@ -157,8 +164,8 @@ async function createCaseFromAlerts(client, alerts) {
 
 /**
  * /case <alertID> and the singleton "Create case" button
- * Fetches the alert, then (if it has a user + host) gathers sibling alerts from
- * the same user + host within the grouping window and files them into one case
+ * Files just the given alert into a case - no sibling gathering. The grouped
+ * "Create case" button uses createCaseForGroup to combine a whole incident
  *
  * @param {string} apiKey    // the analyst's Elastic API key
  * @param {string} alertId
@@ -178,26 +185,7 @@ async function createCaseForAlert(apiKey, alertId) {
     );
   }
 
-  let alerts = [alert];
-  if (alert.userName && alert.hostName) {
-    const anchor = Date.parse(alert.timestamp) || Date.now();
-    const win = config.grouping.windowMs;
-    try {
-      const related = await client.getRelatedAlerts({
-        spaceId: alert.spaceId,
-        userName: alert.userName,
-        hostName: alert.hostName,
-        from: new Date(anchor - win).toISOString(),
-        to: new Date(anchor + win).toISOString(),
-        size: config.grouping.maxAlertsPerCase,
-      });
-      alerts = dedupeById([alert, ...related]);
-    } catch {
-      // sibling lookup failed - fall back to just this alert
-    }
-  }
-
-  return createCaseFromAlerts(client, alerts);
+  return createCaseFromAlerts(client, [alert]);
 }
 
 /**

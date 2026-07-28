@@ -39,6 +39,17 @@ function caseCreatedBlocks({
   link,
   slackUserId,
 }) {
+  const meta = [
+    { type: 'mrkdwn', text: `*Case ID:* \`${esc(caseId)}\`` },
+    { type: 'mrkdwn', text: `*Space:* ${esc(spaceName)}` },
+  ];
+  if (alertCount > 1) meta.push({ type: 'mrkdwn', text: `*Alerts:* ${alertCount}` });
+
+  const rulesEl =
+    alertCount > 1
+      ? { type: 'mrkdwn', text: `*Rules:* ${ruleBreakdown(ruleCounts, ruleName)}` }
+      : { type: 'mrkdwn', text: `*Rule:* ${esc(ruleName)}` };
+
   const blocks = [
     {
       type: 'section',
@@ -47,18 +58,8 @@ function caseCreatedBlocks({
         text: `:white_check_mark: *Case created* by <@${slackUserId}>\n*<${link}|${esc(title)}>*`,
       },
     },
-    {
-      type: 'context',
-      elements: [
-        { type: 'mrkdwn', text: `*Case ID:* \`${esc(caseId)}\`` },
-        { type: 'mrkdwn', text: `*Space:* ${esc(spaceName)}` },
-        { type: 'mrkdwn', text: `*Alerts:* ${alertCount}` },
-      ],
-    },
-    {
-      type: 'context',
-      elements: [{ type: 'mrkdwn', text: `*Rules:* ${ruleBreakdown(ruleCounts, ruleName)}` }],
-    },
+    { type: 'context', elements: meta },
+    { type: 'context', elements: [rulesEl] },
     {
       type: 'context',
       elements: [
