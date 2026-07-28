@@ -30,6 +30,5 @@ POST /_security/api_key
         }
       ]
     }
-  },
-  "return_encoded_key": true
+  }
 }
