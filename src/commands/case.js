@@ -1,15 +1,22 @@
 'use strict';
 
-const { createCaseForAlert, UserFacingError } = require('../services/caseService');
+const {
+  createCaseForAlert,
+  createCaseForGroup,
+  UserFacingError,
+} = require('../services/caseService');
 const { caseCreatedBlocks } = require('../services/format');
+const { decodeGroupValue } = require('../grouping');
 
 /*
  * /case (alertID)
  *   Creates a case for the alert in the alert's space, titled per the naming
- *   scheme, and attaches the alert. Reply is posted in-channel so the team sees
- *   the new case ID (needed for /add_alert).
+ *   scheme, and attaches the alert. If the alert has a user + host, sibling alerts
+ *   within the grouping window are pulled in and filed into the same case.
+ *   Reply is posted in-channel so the team sees the new case ID
  *
- * Also registers the "Create case" button that the alert watcher attaches to new-alert notifications
+ * Also registers the "Create case" button the alert watcher attaches to its
+ * notifications - it files the whole incident (all correlated alerts) into one case
  */
 
 const NEED_START =
@@ -47,10 +54,10 @@ module.exports = function registerCase(app, ctx) {
     }
   });
 
-  // Button on watcher alert notifications
-  app.action('create_case_from_alert', async ({ ack, body, action, client, respond }) => {
+  // Button on watcher alert notifications - creates ONE case for the whole
+  // incident (all correlated alerts), not just the alert that was clicked
+  app.action('create_case_from_alert', async ({ ack, body, action, client }) => {
     await ack();
-    const alertId = action.value;
     const slackUserId = body.user.id;
 
     const user = ctx.users.get(slackUserId);
@@ -63,8 +70,20 @@ module.exports = function registerCase(app, ctx) {
       return;
     }
 
+    const desc = decodeGroupValue(action.value);
+
     try {
-      const result = await createCaseForAlert(user.apiKey, alertId);
+      const result =
+        desc.k === 'g'
+          ? await createCaseForGroup(user.apiKey, {
+              spaceId: desc.s,
+              userName: desc.u,
+              hostName: desc.h,
+              from: desc.f,
+              to: desc.t,
+            })
+          : await createCaseForAlert(user.apiKey, desc.a);
+
       await client.chat.postMessage({
         channel: body.channel.id,
         blocks: caseCreatedBlocks({ ...result, slackUserId }),

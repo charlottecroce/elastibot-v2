@@ -54,6 +54,15 @@ module.exports = {
     statePath: process.env.STATE_PATH || './data/state.json',
   },
 
+  grouping: {
+    // Alerts from the same user + host (same space) within this window are treated
+    // as one incident, collapsed into a single Slack message and, when a case is
+    // made, attached together. Default 2 minutes
+    windowMs: int(process.env.GROUP_WINDOW_MS, 120000),
+    // Cap on how many alerts a single grouped case will pull in
+    maxAlertsPerCase: int(process.env.GROUP_MAX_ALERTS, 200),
+  },
+
   naming: {
     truncateRuleWords: null,
   },
@@ -61,6 +70,9 @@ module.exports = {
   watchers: {
     enabled: bool(process.env.WATCHERS_ENABLED, true),
     pollIntervalMs: int(process.env.WATCH_POLL_MS, 60000),
+    // How many new alerts to pull per poll - keep above a plausible burst size so a
+    // spike is grouped in one pass instead of split across polls
+    fetchSize: int(process.env.WATCH_FETCH_SIZE, 200),
 
     // ---------------------------------------------------------------
     // CHANNEL ROUTING

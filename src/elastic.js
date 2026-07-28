@@ -105,9 +105,45 @@ function createElasticClient(apiKey) {
           index: hit._index,
           spaceId: (Array.isArray(spaceIds) ? spaceIds[0] : spaceIds) || 'default',
           ruleName: field(src, 'kibana.alert.rule.name') || 'Unknown Rule',
+          ruleId: field(src, 'kibana.alert.rule.uuid'),
           severity: field(src, 'kibana.alert.severity') || 'unknown',
           timestamp: field(src, 'kibana.alert.@timestamp') || field(src, '@timestamp'),
           owner: ownerFromConsumer(field(src, 'kibana.alert.rule.consumer')),
+          userName: field(src, 'user.name'),
+          hostName: field(src, 'host.name'),
+        };
+      });
+    },
+
+    /**
+     * All alerts for a user + host in a space within [from, to] (inclusive)
+     * Used to combine a burst of related alerts into a single case
+     */
+    async getRelatedAlerts({ spaceId, userName, hostName, from, to, size = 200 }) {
+      const must = [
+        { term: { 'user.name': userName } },
+        { term: { 'host.name': hostName } },
+        { range: { '@timestamp': { gte: from, lte: to } } },
+      ];
+      if (spaceId) must.push({ term: { 'kibana.space_ids': spaceId } });
+      const { data } = await es.post(
+        `/${encodeURIComponent(config.elastic.alertsIndex)}/_search`,
+        { size, sort: [{ '@timestamp': 'asc' }], query: { bool: { must } } }
+      );
+      return (data?.hits?.hits || []).map((hit) => {
+        const src = hit._source || {};
+        const spaceIds = field(src, 'kibana.space_ids');
+        return {
+          id: hit._id,
+          index: hit._index,
+          spaceId: (Array.isArray(spaceIds) ? spaceIds[0] : spaceIds) || spaceId || 'default',
+          ruleName: field(src, 'kibana.alert.rule.name') || 'Unknown Rule',
+          ruleId: field(src, 'kibana.alert.rule.uuid'),
+          severity: field(src, 'kibana.alert.severity') || 'unknown',
+          timestamp: field(src, 'kibana.alert.@timestamp') || field(src, '@timestamp'),
+          owner: ownerFromConsumer(field(src, 'kibana.alert.rule.consumer')),
+          userName: field(src, 'user.name'),
+          hostName: field(src, 'host.name'),
         };
       });
     },

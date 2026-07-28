@@ -2,12 +2,17 @@
 
 const config = require('../../config');
 const { serviceClient } = require('../elastic');
-const { caseUrl, newAlertBlocks, newCaseBlocks } = require('../services/format');
+const { caseUrl, alertGroupBlocks, newCaseBlocks } = require('../services/format');
+const { groupAlerts, encodeGroupValue } = require('../grouping');
 
 /*
  * Polling watchers. Every pollIntervalMs we ask Elastic for anything new since
  * the last run and post it to the routed Slack channel. Last-seen timestamps
  * are persisted so restarts don't replay or miss items.
+ *
+ * Alerts are grouped by user + host (within the grouping window) before posting,
+ * so a burst of related alerts becomes ONE channel message with a single
+ * "Create case" button rather than one message per alert.
  *
  * Routing: config.watchers.channelRouting[spaceId] || config.watchers.defaultChannel
  */
@@ -23,33 +28,45 @@ async function pollAlerts(client, state, spaceNameCache) {
   const since = state.get(STATE_ALERTS, null);
   let alerts;
   try {
-    alerts = await serviceClient.getAlertsSince(since, 25);
+    alerts = await serviceClient.getAlertsSince(since, config.watchers.fetchSize);
   } catch (err) {
     console.error('[watcher:alerts] query failed:', err.response?.status || err.message);
     return;
   }
   if (!alerts.length) return;
 
-  for (const alert of alerts) {
-    const channel = channelFor(alert.spaceId);
+  // Collapse related alerts (same user + host, within the window) into incidents
+  const groups = groupAlerts(alerts, config.grouping.windowMs);
+
+  for (const group of groups) {
+    const channel = channelFor(group.spaceId);
     if (!channel) continue; // no route configured > skip quietly
 
-    let spaceName = spaceNameCache.get(alert.spaceId);
+    let spaceName = spaceNameCache.get(group.spaceId);
     if (!spaceName) {
-      spaceName = await serviceClient.getSpaceName(alert.spaceId);
-      spaceNameCache.set(alert.spaceId, spaceName);
+      spaceName = await serviceClient.getSpaceName(group.spaceId);
+      spaceNameCache.set(group.spaceId, spaceName);
     }
 
     try {
       await client.chat.postMessage({
         channel,
-        text: `New alert: ${alert.ruleName}`,
-        blocks: newAlertBlocks({
-          alertId: alert.id,
-          ruleName: alert.ruleName,
-          severity: alert.severity,
+        text:
+          group.count > 1
+            ? `${group.count} related alerts: ${group.representativeRule}`
+            : `New alert: ${group.representativeRule}`,
+        blocks: alertGroupBlocks({
+          count: group.count,
+          representativeRule: group.representativeRule,
+          ruleCounts: group.ruleCounts,
+          topSeverity: group.topSeverity,
+          userName: group.userName,
+          hostName: group.hostName,
           spaceName,
-          timestamp: alert.timestamp,
+          from: group.from,
+          to: group.to,
+          alertId: group.alerts[0].id,
+          buttonValue: encodeGroupValue(group),
         }),
       });
     } catch (err) {
