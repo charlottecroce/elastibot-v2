@@ -4,7 +4,7 @@ const config = require('../../config');
 
 /** Build a Kibana link to a case, respecting space + solution */
 function caseUrl(spaceId, caseId, owner) {
-  const base = (config.elastic.kibanaUrl || '').replace(/\/$/, '');
+  const base = (config.elastic.kibanaPublicUrl || config.elastic.kibanaUrl || '').replace(/\/$/, '');
   const sp = spaceId && spaceId !== 'default' ? `/s/${encodeURIComponent(spaceId)}` : '';
   const id = encodeURIComponent(caseId);
   if (owner === 'securitySolution') return `${base}${sp}/app/security/cases/${id}`;

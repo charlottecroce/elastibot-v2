@@ -164,6 +164,30 @@ function createElasticClient(apiKey) {
       return data;
     },
 
+    /** Fetch one case - we want its `status` before attaching an alert */
+    async getCase(spaceId, caseId) {
+      const { data } = await kib.get(
+        `${spacePath(spaceId)}/api/cases/${encodeURIComponent(caseId)}`
+      );
+      return data;
+    },
+
+    /**
+     * Force the workflow status on alerts
+     *
+     * Case syncing only pushes status to alerts when the CASE status changes, so
+     * an alert joining an already in-progress/closed case needs this once. After
+     * that the case's own syncing keeps it in line
+     */
+    async setAlertsWorkflowStatus(spaceId, alertIds, status) {
+      if (!alertIds || !alertIds.length) return null;
+      const { data } = await kib.post(
+        `${spacePath(spaceId)}/api/detection_engine/signals/status`,
+        { signal_ids: alertIds, status }
+      );
+      return data;
+    },
+
     /** Attach an alert to an existing case */
     async attachAlert(spaceId, caseId, attachment) {
       const { data } = await kib.post(

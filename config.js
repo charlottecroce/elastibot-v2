@@ -27,7 +27,13 @@ module.exports = {
 
   elastic: {
     // --- secrets / endpoints (.env) ---
+    // API endpoint - every request Elastibot makes goes here, so it must be the
+    // instance the API keys authenticate against (usually a direct node, not a proxy)
     kibanaUrl: process.env.KIBANA_URL,
+    // Browser endpoint used only for the links posted in Slack. Set it to the proxy
+    // analysts actually log in to, so clicking a case link doesn't force a re-login.
+    // Falls back to kibanaUrl when unset
+    kibanaPublicUrl: process.env.KIBANA_PUBLIC_URL || process.env.KIBANA_URL,
     esUrl: process.env.ELASTICSEARCH_URL,
     // Service key used for non-user work (watchers, space-name lookups)
     serviceApiKey: process.env.ELASTIC_SERVICE_API_KEY,

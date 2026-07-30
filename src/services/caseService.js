@@ -10,6 +10,17 @@ const { caseUrl } = require('./format');
  */
 class UserFacingError extends Error {}
 
+/*
+ * Case status > the matching alert workflow status. Kibana's case syncing uses
+ * the same mapping; we only apply it by hand for an alert that joins a case
+ * AFTER that case's status was last changed
+ */
+const ALERT_STATUS_FOR_CASE = {
+  open: 'open',
+  'in-progress': 'acknowledged',
+  closed: 'closed',
+};
+
 /** Format an ECS field for the description: join arrays, fall back to N/A */
 function fmtField(value) {
   if (Array.isArray(value)) value = value.filter(Boolean).join(', ');
@@ -57,6 +68,9 @@ function topKey(counts) {
  * Create one case from one OR many alerts (already fetched), in the shared space
  * Title uses the most common rule. Alerts are attached in per-rule batches (the
  * comments API takes one rule per alert-comment but accepts an array of alert ids)
+ *
+ * syncAlerts is on, so the case status drives the status of every alert attached
+ * to it from here on - closing the case closes its alerts
  */
 async function createCaseFromAlerts(client, alerts) {
   const spaceId = alerts[0].spaceId || 'default';
@@ -221,6 +235,10 @@ async function createCaseForGroup(apiKey, { spaceId, userName, hostName, from, t
 /**
  * Attach an alert to an existing case. The case and alert must live in the same space
  *
+ * We read the case first for its status: Kibana only pushes status to alerts on a
+ * case status *change*, so an alert joining an already in-progress/closed case
+ * would otherwise stay open. We set it to match once, then syncing takes over
+ *
  * @returns {Promise<{caseId,alertId,ruleName,link}>}
  */
 async function addAlertToCase(apiKey, caseId, alertId) {
@@ -236,6 +254,20 @@ async function addAlertToCase(apiKey, caseId, alertId) {
     throw new UserFacingError(`No alert found with ID \`${alertId}\`.`);
   }
 
+  let existingCase;
+  try {
+    existingCase = await client.getCase(alert.spaceId, caseId);
+  } catch (err) {
+    const e = describeAxiosError(err, 'Looking up case');
+    if (/not found/i.test(e.message)) {
+      throw new UserFacingError(
+        `Could not find case \`${caseId}\` in space \`${alert.spaceId}\`. ` +
+          'Double-check the case ID from Elastibot\'s creation message.'
+      );
+    }
+    throw e;
+  }
+
   try {
     await client.attachAlert(alert.spaceId, caseId, {
       type: 'alert',
@@ -245,14 +277,17 @@ async function addAlertToCase(apiKey, caseId, alertId) {
       owner: alert.owner,
     });
   } catch (err) {
-    const e = describeAxiosError(err, 'Adding alert to case');
-    if (/not found/i.test(e.message)) {
-      throw new UserFacingError(
-        `Could not find case \`${caseId}\` in space \`${alert.spaceId}\`. ` +
-          'Double-check the case ID from Elastibot\'s creation message.'
-      );
+    throw describeAxiosError(err, 'Adding alert to case');
+  }
+
+  // Catch the alert up to a case that's already in-progress/closed
+  const desired = ALERT_STATUS_FOR_CASE[existingCase.status] || 'open';
+  if (desired !== 'open') {
+    try {
+      await client.setAlertsWorkflowStatus(alert.spaceId, [alert.id], desired);
+    } catch (err) {
+      console.error('[add_alert] status sync failed:', err.response?.status || err.message);
     }
-    throw e;
   }
 
   return {
