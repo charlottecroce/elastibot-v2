@@ -1,0 +1,34 @@
+POST /_security/api_key
+{
+  "name": "elastibot-charlotte.croce",
+  "role_descriptors": {
+    "elastibot_analyst": {
+      "cluster": [],
+      "indices": [
+        {
+          "names": [
+            ".alerts-security.alerts-*",
+            ".internal.alerts-security.alerts-*"
+          ],
+          "privileges": [
+            "read",
+            "view_index_metadata",
+            "write"
+          ]
+        }
+      ],
+      "applications": [
+        {
+          "application": "kibana-.kibana",
+          "privileges": [
+            "feature_securitySolutionCases.all",
+            "feature_siem.read"
+          ],
+          "resources": [
+            "*"
+          ]
+        }
+      ]
+    }
+  }
+}
