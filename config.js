@@ -12,6 +12,8 @@ require('dotenv').config();
 const bool = (v, dflt) => (v === undefined ? dflt : String(v).toLowerCase() === 'true');
 const int = (v, dflt) => (v === undefined ? dflt : parseInt(v, 10));
 
+const isProd = process.env.NODE_ENV === 'production';
+
 module.exports = {
   slack: {
     // --- secrets (.env) ---
@@ -48,6 +50,21 @@ module.exports = {
 
     // Fallback owner if it can't be derived from the alert's consumer
     defaultOwner: process.env.DEFAULT_CASE_OWNER || 'securitySolution',
+  },
+
+  // ---------------------------------------------------------------
+  // LOGGING
+  // Everything logs through src/util/logger.js. Secrets are redacted
+  // from log records regardless of these settings
+  // ---------------------------------------------------------------
+  logging: {
+    // trace | debug | info | warn | error | fatal | silent
+    // Tests default to silent unless LOG_LEVEL is set explicitly
+    level: process.env.LOG_LEVEL || (isProd ? 'info' : 'debug'),
+    // 'json' for log shipping (one object per line), 'pretty' for a terminal
+    format: process.env.LOG_FORMAT || (isProd ? 'json' : 'pretty'),
+    // Leave on. Only turn it off to debug the redactor itself, never in prod
+    redact: bool(process.env.LOG_REDACT, true),
   },
 
   security: {

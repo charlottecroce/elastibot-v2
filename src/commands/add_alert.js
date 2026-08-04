@@ -1,6 +1,6 @@
 'use strict';
 
-const { addAlertToCase, UserFacingError } = require('../services/caseService');
+const { addAlertToCase } = require('../services/caseService');
 const { alertAddedBlocks } = require('../services/format');
 
 /*
@@ -8,38 +8,24 @@ const { alertAddedBlocks } = require('../services/format');
  *   Attaches an alert to an existing case
  */
 
-module.exports = function registerAddAlert(app, ctx) {
-  app.command('/add_alert', async ({ command, ack, respond }) => {
-    await ack();
-    const [caseId, alertId] = (command.text || '').trim().split(/\s+/);
-
-    if (!caseId || !alertId) {
-      await respond({
-        response_type: 'ephemeral',
-        text: 'Usage: `/add_alert <caseID> <alertID>`',
-      });
-      return;
-    }
-
-    const user = ctx.users.get(command.user_id);
-    if (!user) {
-      await respond({
-        response_type: 'ephemeral',
-        text: 'Run `/start <kibana_username>` first to register your Elastic API key.',
-      });
-      return;
-    }
-
-    try {
+module.exports = function registerAddAlert(reg) {
+  reg.command(
+    '/add_alert',
+    async ({ args, user, reply, slackUserId, log }) => {
+      const [caseId, alertId] = args;
       const result = await addAlertToCase(user.apiKey, caseId, alertId);
-      await respond({
-        response_type: 'in_channel',
-        blocks: alertAddedBlocks({ ...result, slackUserId: command.user_id }),
+
+      log.info('alert attached', { caseId: result.caseId, alertId: result.alertId });
+
+      await reply.inChannel({
+        blocks: alertAddedBlocks({ ...result, slackUserId }),
         text: `Alert ${result.alertId} added to case ${result.caseId}`,
       });
-    } catch (err) {
-      const msg = err instanceof UserFacingError ? err.message : `Unexpected error: ${err.message}`;
-      await respond({ response_type: 'ephemeral', text: `:x: ${msg}` });
+    },
+    {
+      requireUser: true,
+      usage: 'Usage: `/add_alert <caseID> <alertID>`',
+      minArgs: 2,
     }
-  });
+  );
 };

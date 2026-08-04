@@ -4,6 +4,7 @@ const config = require('../../config');
 const { serviceClient } = require('../elastic');
 const { caseUrl, alertGroupBlocks, newCaseBlocks } = require('../services/format');
 const { groupAlerts, encodeGroupValue } = require('../grouping');
+const { logger } = require('../util/logger');
 
 /*
  * Polling watchers. Every pollIntervalMs we ask Elastic for anything new since
@@ -24,6 +25,10 @@ const { groupAlerts, encodeGroupValue } = require('../grouping');
 const STATE_ALERTS = 'alertsLastTs';
 const STATE_CASES = 'casesLastTs'; // { [spaceId]: iso }
 
+const log = logger.child({ scope: 'watchers' });
+const alertLog = logger.child({ scope: 'watcher:alerts' });
+const caseLog = logger.child({ scope: 'watcher:cases' });
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function channelFor(spaceId) {
@@ -35,7 +40,9 @@ async function pollAlerts(client, state, spaceNameCache) {
 
   // First run: start from now, don't replay history
   if (!since) {
-    state.set(STATE_ALERTS, new Date().toISOString());
+    const from = new Date().toISOString();
+    state.set(STATE_ALERTS, from);
+    alertLog.info('no cursor found - watching from now, not backfilling', { from });
     return;
   }
 
@@ -43,17 +50,33 @@ async function pollAlerts(client, state, spaceNameCache) {
   try {
     alerts = await serviceClient.getAlertsSince(since, config.watchers.fetchSize);
   } catch (err) {
-    console.error('[watcher:alerts] query failed:', err.response?.status || err.message);
+    alertLog.error('alert query failed - cursor not advanced', { err, since });
     return;
   }
-  if (!alerts.length) return;
+  if (!alerts.length) {
+    alertLog.debug('no new alerts', { since });
+    return;
+  }
 
   // Collapse related alerts (same user + host, within the window) into incidents
   const groups = groupAlerts(alerts, config.grouping.windowMs);
+  alertLog.info('new alerts', { alerts: alerts.length, incidents: groups.length, since });
+
+  let posted = 0;
+  let skipped = 0;
 
   for (const group of groups) {
     const channel = channelFor(group.spaceId);
-    if (!channel) continue; // no route configured > skip quietly
+    if (!channel) {
+      // no route configured > skip quietly, but count it: a permanently
+      // unrouted space is a config mistake worth seeing in the tick summary
+      skipped += 1;
+      alertLog.debug('no channel routed for space - skipping incident', {
+        spaceId: group.spaceId,
+        count: group.count,
+      });
+      continue;
+    }
 
     let spaceName = spaceNameCache.get(group.spaceId);
     if (!spaceName) {
@@ -82,29 +105,41 @@ async function pollAlerts(client, state, spaceNameCache) {
           buttonValue: encodeGroupValue(group),
         }),
       });
+      posted += 1;
       await sleep(config.watchers.postDelayMs);
     } catch (err) {
-      console.error('[watcher:alerts] post failed:', err.data?.error || err.message);
+      alertLog.warn('post failed', {
+        err,
+        channel,
+        spaceId: group.spaceId,
+        count: group.count,
+      });
     }
   }
 
   // Advance the cursor to the newest alert we just processed
   const newest = alerts[alerts.length - 1].timestamp;
   if (newest) state.set(STATE_ALERTS, newest);
+
+  alertLog.debug('tick complete', { posted, skipped, cursor: newest });
 }
 
 async function pollCases(client, state, spaceNameCache) {
   const cursors = state.get(STATE_CASES, {});
 
   for (const spaceId of config.watchers.cases.spaces) {
+    const spaceLog = caseLog.child({ spaceId });
     const channel = channelFor(spaceId);
-    if (!channel) continue;
+    if (!channel) {
+      spaceLog.debug('no channel routed for space - skipping');
+      continue;
+    }
 
     let cases;
     try {
       cases = await serviceClient.findRecentCases(spaceId, 25);
     } catch (err) {
-      console.error(`[watcher:cases:${spaceId}] query failed:`, err.response?.status || err.message);
+      spaceLog.error('case query failed - cursor not advanced', { err });
       continue;
     }
 
@@ -113,6 +148,7 @@ async function pollCases(client, state, spaceNameCache) {
     // First run for this space: start from newest, don't backfill (cases are desc)
     if (!since) {
       cursors[spaceId] = cases.length ? cases[0].created_at : new Date().toISOString();
+      spaceLog.info('no cursor found - watching from now', { from: cursors[spaceId] });
       continue;
     }
 
@@ -122,6 +158,7 @@ async function pollCases(client, state, spaceNameCache) {
       .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
     if (!fresh.length) continue;
+    spaceLog.info('new cases', { count: fresh.length, since });
 
     let spaceName = spaceNameCache.get(spaceId);
     if (!spaceName) {
@@ -144,7 +181,7 @@ async function pollCases(client, state, spaceNameCache) {
         });
         await sleep(config.watchers.postDelayMs);
       } catch (err) {
-        console.error(`[watcher:cases:${spaceId}] post failed:`, err.data?.error || err.message);
+        spaceLog.warn('post failed', { err, channel, caseId: c.id });
       }
     }
 
@@ -159,15 +196,19 @@ async function pollCases(client, state, spaceNameCache) {
  */
 function startWatchers(app, state) {
   if (!config.watchers.enabled) {
-    console.log('[watchers] disabled via config.');
+    log.info('watchers disabled via config');
     return () => {};
   }
   if (!serviceClient) {
-    console.warn('[watchers] ELASTIC_SERVICE_API_KEY not set — watchers cannot run.');
+    log.warn('ELASTIC_SERVICE_API_KEY not set - watchers cannot run', {
+      remedy: 'set ELASTIC_SERVICE_API_KEY in .env, or WATCHERS_ENABLED=false to silence this',
+    });
     return () => {};
   }
   if (!config.watchers.defaultChannel && Object.keys(config.watchers.channelRouting).length === 0) {
-    console.warn('[watchers] no channel routing configured — nothing will be posted.');
+    log.warn('no channel routing configured - nothing will be posted', {
+      remedy: 'set DEFAULT_CHANNEL or fill in config.watchers.channelRouting',
+    });
   }
 
   const client = app.client;
@@ -175,13 +216,20 @@ function startWatchers(app, state) {
   let running = false;
 
   const tick = async () => {
-    if (running) return; // avoid overlap on slow clusters
+    if (running) {
+      log.warn('previous tick still running - skipping this interval', {
+        pollIntervalMs: config.watchers.pollIntervalMs,
+      });
+      return;
+    }
     running = true;
+    const started = Date.now();
     try {
       if (config.watchers.alerts.enabled) await pollAlerts(client, state, spaceNameCache);
       if (config.watchers.cases.enabled) await pollCases(client, state, spaceNameCache);
+      log.debug('tick complete', { ms: Date.now() - started });
     } catch (err) {
-      console.error('[watchers] tick error:', err.message);
+      log.error('tick failed', { err, ms: Date.now() - started });
     } finally {
       running = false;
     }
@@ -189,7 +237,12 @@ function startWatchers(app, state) {
 
   const timer = setInterval(tick, config.watchers.pollIntervalMs);
   tick(); // run once immediately
-  console.log(`[watchers] polling every ${config.watchers.pollIntervalMs}ms.`);
+  log.info('watchers started', {
+    pollIntervalMs: config.watchers.pollIntervalMs,
+    alerts: config.watchers.alerts.enabled,
+    cases: config.watchers.cases.enabled,
+    caseSpaces: config.watchers.cases.spaces,
+  });
   return () => clearInterval(timer);
 }
 

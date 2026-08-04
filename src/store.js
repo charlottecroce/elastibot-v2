@@ -3,16 +3,41 @@
 const fs = require('fs');
 const path = require('path');
 const { encrypt, decrypt } = require('./util/crypto');
+const { logger } = require('./util/logger');
+
+const log = logger.child({ scope: 'store' });
 
 /** Ensure the directory for a file path exists */
 function ensureDir(filePath) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
 
+/*
+ * A missing file is normal (first boot). A file that exists but won't parse is
+ * NOT normal. Distinguish the two and alert about the second
+ */
 function readJson(filePath, fallback) {
+  let raw;
   try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch {
+    raw = fs.readFileSync(filePath, 'utf8');
+  } catch (err) {
+    if (err.code !== 'ENOENT') {
+      log.error('could not read store file - starting empty', { err, filePath });
+    } else {
+      log.debug('no store file yet - starting empty', { filePath });
+    }
+    return fallback;
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    log.error('store file is corrupt - starting empty, existing records are NOT loaded', {
+      err,
+      filePath,
+      bytes: raw.length,
+      remedy: 'restore the file from backup, or analysts will need to re-run /start',
+    });
     return fallback;
   }
 }
@@ -32,6 +57,7 @@ class UserStore {
     this.filePath = filePath;
     this.encryptionKey = encryptionKey;
     this.data = readJson(filePath, {});
+    log.debug('user store loaded', { filePath, users: Object.keys(this.data).length });
   }
 
   /** Returns { kibanaUsername, apiKey } with apiKey decrypted, or null */
