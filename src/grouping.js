@@ -1,5 +1,7 @@
 'use strict';
 
+const { UNKNOWN_RULE, SEVERITY_RANK } = require('./constants');
+
 /*
  * Alert grouping
  *
@@ -12,9 +14,8 @@
  * Time clustering: alerts join a cluster while within `windowMs` of the cluster's
  *   first alert. Alerts missing user.name or host.name can't be correlated, so
  *   each becomes its own singleton group
+ * 
  */
-
-const SEVERITY_RANK = { critical: 4, high: 3, medium: 2, low: 1, unknown: 0 };
 
 function ts(a) {
   const t = Date.parse(a.timestamp);
@@ -26,13 +27,13 @@ function makeGroup(alerts) {
   const ruleCounts = {};
   let topSeverity = 'unknown';
   for (const a of sorted) {
-    const rn = a.ruleName || 'Unknown Rule';
+    const rn = a.ruleName || UNKNOWN_RULE;
     ruleCounts[rn] = (ruleCounts[rn] || 0) + 1;
     const sev = a.severity || 'unknown';
     if ((SEVERITY_RANK[sev] || 0) > (SEVERITY_RANK[topSeverity] || 0)) topSeverity = sev;
   }
   const representativeRule =
-    Object.entries(ruleCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Unknown Rule';
+    Object.entries(ruleCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || UNKNOWN_RULE;
 
   return {
     spaceId: sorted[0].spaceId,
@@ -124,4 +125,4 @@ function decodeGroupValue(value) {
   return { k: 'a', a: value };
 }
 
-module.exports = { groupAlerts, makeGroup, encodeGroupValue, decodeGroupValue, SEVERITY_RANK };
+module.exports = { groupAlerts, makeGroup, encodeGroupValue, decodeGroupValue };

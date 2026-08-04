@@ -2,7 +2,7 @@
 
 const config = require('../../config');
 const { createElasticClient } = require('../elastic');
-const { UserFacingError, describeAxiosError } = require('./caseService');
+const { UserFacingError, describeAxiosError } = require('../util/errors');
 
 /*
  * /stats - the numbers behind the alerts index

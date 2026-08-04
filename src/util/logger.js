@@ -194,7 +194,7 @@ function indent(text) {
 function resolveSettings() {
   let cfg = {};
   try {
-    // eslint-disable-next-line global-require
+    // Required lazily and defensively: the logger must survive config throwing
     cfg = require('../../config').logging || {};
   } catch {
     /* config unavailable or still loading - fall back to env */
@@ -247,7 +247,8 @@ class Logger {
     const merged = { ...this.bindings, ...(fields || {}) };
     const payload = settings.redact ? redact(merged) : merged;
 
-    // The message itself gets scrubbed too
+    // The message itself gets scrubbed too - a token pasted into an error
+    // string is just as leaked as one sitting in a field
     const text = String(msg);
     const rec = {
       time: new Date().toISOString(),

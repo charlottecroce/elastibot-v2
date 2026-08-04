@@ -1,9 +1,13 @@
 'use strict';
 
 /*
- * config.js - Edit this file to configure your deployment
+ * config/index.js - Edit this file to configure your deployment
  * See .env.example for the secrets that must be set in `.env`
  *
+ * This was config.js at the repo root. It is now a directory so that validation
+ * (config/validate.js) lives next to the thing it validates instead of inside
+ * app.js. Node resolves `require('./config')` to this file, so no import
+ * anywhere else changed - but DELETE the old config.js, or Node will prefer it
  */
 
 require('dotenv').config();
@@ -11,10 +15,14 @@ require('dotenv').config();
 /** helpers so env vars parse predictably */
 const bool = (v, dflt) => (v === undefined ? dflt : String(v).toLowerCase() === 'true');
 const int = (v, dflt) => (v === undefined ? dflt : parseInt(v, 10));
+const num = (v, dflt) => (v === undefined ? dflt : Number(v));
 
 const isProd = process.env.NODE_ENV === 'production';
 
 module.exports = {
+  // How long shutdown gets to drain watchers and flush stores before a hard exit
+  shutdownTimeoutMs: int(process.env.SHUTDOWN_TIMEOUT_MS, 15000),
+
   slack: {
     // --- secrets (.env) ---
     botToken: process.env.SLACK_BOT_TOKEN,          // xoxb-...
@@ -50,6 +58,11 @@ module.exports = {
 
     // Fallback owner if it can't be derived from the alert's consumer
     defaultOwner: process.env.DEFAULT_CASE_OWNER || 'securitySolution',
+
+    // Retry transient failures (429, 502/503/504, timeouts) on READ requests only.
+    // Writes are never retried - creating a case twice is worse than failing once
+    retries: int(process.env.ELASTIC_RETRIES, 2),
+    retryBaseDelayMs: int(process.env.ELASTIC_RETRY_BASE_MS, 250),
   },
 
   // ---------------------------------------------------------------
@@ -67,6 +80,19 @@ module.exports = {
     redact: bool(process.env.LOG_REDACT, true),
   },
 
+  // ---------------------------------------------------------------
+  // CACHING
+  // ---------------------------------------------------------------
+  cache: {
+    // Space display names change about once a year; an hour of staleness after a
+    // rename is an acceptable trade for one lookup per space per hour
+    spaceNameTtlMs: int(process.env.SPACE_NAME_TTL_MS, 3600000),
+    // Per-analyst Elastic clients are reused rather than rebuilt per command.
+    // Expiring them bounds the window in which a revoked key still has a client
+    clientTtlMs: int(process.env.ELASTIC_CLIENT_TTL_MS, 900000),
+    maxClients: int(process.env.ELASTIC_MAX_CLIENTS, 250),
+  },
+
   security: {
     // 32+ char secret used to encrypt each analyst's stored Elastic API key at rest (AES-256-GCM)
     // If unset, keys are stored in plaintext and a warning is logged at startup
@@ -75,6 +101,9 @@ module.exports = {
     // Local persistence (gitignored)
     userStorePath: process.env.USER_STORE_PATH || './data/users.json',
     statePath: process.env.STATE_PATH || './data/state.json',
+    // 0 = write through on every change. Raise it to batch cursor writes; the
+    // store is flushed on shutdown either way
+    stateDebounceMs: int(process.env.STATE_DEBOUNCE_MS, 0),
   },
 
   grouping: {
@@ -88,6 +117,7 @@ module.exports = {
 
   naming: {
     truncateRuleWords: null,
+    timeZone: process.env.CASE_TITLE_TIMEZONE || process.env.STATS_TIMEZONE || 'UTC',
   },
 
   stats: {
@@ -110,14 +140,14 @@ module.exports = {
   watchers: {
     enabled: bool(process.env.WATCHERS_ENABLED, true),
     pollIntervalMs: int(process.env.WATCH_POLL_MS, 60000),
+    // Randomise each interval by +/- this fraction, so two replicas started by
+    // the same deploy don't hit Elastic in lockstep forever
+    jitterRatio: num(process.env.WATCH_JITTER_RATIO, 0.1),
     // How many new alerts to pull per poll - keep above a plausible burst size so a
     // spike is grouped in one pass instead of split across polls
     fetchSize: int(process.env.WATCH_FETCH_SIZE, 200),
     // Delay between channel posts within a tick, to stay under Slack rate limits
     postDelayMs: int(process.env.WATCH_POST_DELAY_MS, 300),
-    // How long an incident (space+user+host) stays "open" for in-place message
-    // updates before a later alert starts a fresh message. Default 10 minutes
-    incidentTtlMs: int(process.env.WATCH_INCIDENT_TTL_MS, 600000),
 
     // ---------------------------------------------------------------
     // CHANNEL ROUTING
@@ -130,10 +160,10 @@ module.exports = {
     },
 
     alerts: {
-      enabled: true,
+      enabled: bool(process.env.WATCH_ALERTS_ENABLED, true),
     },
     cases: {
-      enabled: true,
+      enabled: bool(process.env.WATCH_CASES_ENABLED, true),
       // Cases are polled per-space via the Kibana Cases API. List the space IDs you want watched here.
       spaces: (process.env.WATCH_CASE_SPACES || 'default')
         .split(',')

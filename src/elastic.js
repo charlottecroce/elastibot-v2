@@ -3,13 +3,15 @@
 const https = require('https');
 const axios = require('axios');
 const config = require('../config');
+const { installRetry } = require('./util/retry');
+const { TtlCache } = require('./util/cache');
 
 /*
  * Thin client over Elasticsearch (alert lookups) and Kibana (Cases/Spaces APIs)
  *
  * A single Elastic API key authenticates to BOTH ES and Kibana, so we build one client per API key:
- *   - createElasticClient(apiKey)  > per-analyst (attributes cases to that user)
- *   - serviceClient                > shared, uses the service key for watchers
+ *   - createElasticClient(apiKey)  > per-analyst (attributes cases to that user), cached
+ *   - getServiceClient()           > shared, uses the service key for watchers
  */
 
 const agent = new https.Agent({
@@ -35,7 +37,33 @@ function ownerFromConsumer(consumer, fallback = config.elastic.defaultOwner) {
   return 'cases';
 }
 
-function createElasticClient(apiKey) {
+/**
+ * Map an ES hit to the trimmed alert shape the rest of the app works with.
+ */
+function toAlert(hit, { includeSource = false } = {}) {
+  const src = hit._source || {};
+  const spaceIds = field(src, 'kibana.space_ids');
+  const alert = {
+    id: hit._id,
+    index: hit._index,
+    spaceId: (Array.isArray(spaceIds) ? spaceIds[0] : spaceIds) || 'default',
+    ruleName: field(src, 'kibana.alert.rule.name') || 'Unknown Rule',
+    ruleId: field(src, 'kibana.alert.rule.uuid'),
+    severity: field(src, 'kibana.alert.severity') || 'unknown',
+    timestamp: field(src, 'kibana.alert.@timestamp') || field(src, '@timestamp'),
+    owner: ownerFromConsumer(field(src, 'kibana.alert.rule.consumer')),
+    userName: field(src, 'user.name'),
+    hostName: field(src, 'host.name'),
+  };
+  if (includeSource) alert.source = src;
+  return alert;
+}
+
+/**
+ * Build a client. Prefer createElasticClient(), which caches - this is exported
+ * mainly so the service client can bypass the cache
+ */
+function buildElasticClient(apiKey) {
   if (!apiKey) throw new Error('An Elastic API key is required to build a client.');
 
   const es = axios.create({
@@ -56,36 +84,36 @@ function createElasticClient(apiKey) {
     },
   });
 
+  /*
+   * Retry transient failures. The interceptor only ever retries reads - see
+   * util/retry.js. A 503 during a cluster rebalance used to fail the analyst's
+   * whole command, and they retried it by hand
+   */
+  const retryOpts = {
+    retries: config.elastic.retries,
+    baseDelayMs: config.elastic.retryBaseDelayMs,
+  };
+  installRetry(es, { ...retryOpts, name: 'es' });
+  installRetry(kib, { ...retryOpts, name: 'kibana' });
+
   // Space paths: the default space is un-prefixed; others use /s/<id>
   const spacePath = (spaceId) =>
     spaceId && spaceId !== 'default' ? `/s/${encodeURIComponent(spaceId)}` : '';
+
+  const alertsPath = `/${encodeURIComponent(config.elastic.alertsIndex)}/_search`;
 
   return {
     field,
 
     /** Resolve a single alert document by its _id */
     async getAlertById(alertId) {
-      const { data } = await es.post(
-        `/${encodeURIComponent(config.elastic.alertsIndex)}/_search`,
-        { size: 1, query: { ids: { values: [alertId] } } }
-      );
+      const { data } = await es.post(alertsPath, {
+        size: 1,
+        query: { ids: { values: [alertId] } },
+      });
       const hit = data?.hits?.hits?.[0];
       if (!hit) return null;
-      const src = hit._source || {};
-      const spaceIds = field(src, 'kibana.space_ids');
-      return {
-        id: hit._id,
-        index: hit._index,
-        source: src,
-        spaceId: (Array.isArray(spaceIds) ? spaceIds[0] : spaceIds) || 'default',
-        ruleName: field(src, 'kibana.alert.rule.name') || 'Unknown Rule',
-        ruleId: field(src, 'kibana.alert.rule.uuid'),
-        severity: field(src, 'kibana.alert.severity'),
-        timestamp: field(src, 'kibana.alert.@timestamp') || field(src, '@timestamp'),
-        owner: ownerFromConsumer(field(src, 'kibana.alert.rule.consumer')),
-        userName: field(src, 'user.name'),
-        hostName: field(src, 'host.name'),
-      };
+      return toAlert(hit, { includeSource: true });
     },
 
     /** Alerts with @timestamp strictly after `sinceIso` */
@@ -93,26 +121,12 @@ function createElasticClient(apiKey) {
       const range = sinceIso
         ? { range: { '@timestamp': { gt: sinceIso } } }
         : { match_all: {} };
-      const { data } = await es.post(
-        `/${encodeURIComponent(config.elastic.alertsIndex)}/_search`,
-        { size, sort: [{ '@timestamp': 'asc' }], query: range }
-      );
-      return (data?.hits?.hits || []).map((hit) => {
-        const src = hit._source || {};
-        const spaceIds = field(src, 'kibana.space_ids');
-        return {
-          id: hit._id,
-          index: hit._index,
-          spaceId: (Array.isArray(spaceIds) ? spaceIds[0] : spaceIds) || 'default',
-          ruleName: field(src, 'kibana.alert.rule.name') || 'Unknown Rule',
-          ruleId: field(src, 'kibana.alert.rule.uuid'),
-          severity: field(src, 'kibana.alert.severity') || 'unknown',
-          timestamp: field(src, 'kibana.alert.@timestamp') || field(src, '@timestamp'),
-          owner: ownerFromConsumer(field(src, 'kibana.alert.rule.consumer')),
-          userName: field(src, 'user.name'),
-          hostName: field(src, 'host.name'),
-        };
+      const { data } = await es.post(alertsPath, {
+        size,
+        sort: [{ '@timestamp': 'asc' }],
+        query: range,
       });
+      return (data?.hits?.hits || []).map((hit) => toAlert(hit));
     },
 
     /**
@@ -126,26 +140,12 @@ function createElasticClient(apiKey) {
         { range: { '@timestamp': { gte: from, lte: to } } },
       ];
       if (spaceId) must.push({ term: { 'kibana.space_ids': spaceId } });
-      const { data } = await es.post(
-        `/${encodeURIComponent(config.elastic.alertsIndex)}/_search`,
-        { size, sort: [{ '@timestamp': 'asc' }], query: { bool: { must } } }
-      );
-      return (data?.hits?.hits || []).map((hit) => {
-        const src = hit._source || {};
-        const spaceIds = field(src, 'kibana.space_ids');
-        return {
-          id: hit._id,
-          index: hit._index,
-          spaceId: (Array.isArray(spaceIds) ? spaceIds[0] : spaceIds) || spaceId || 'default',
-          ruleName: field(src, 'kibana.alert.rule.name') || 'Unknown Rule',
-          ruleId: field(src, 'kibana.alert.rule.uuid'),
-          severity: field(src, 'kibana.alert.severity') || 'unknown',
-          timestamp: field(src, 'kibana.alert.@timestamp') || field(src, '@timestamp'),
-          owner: ownerFromConsumer(field(src, 'kibana.alert.rule.consumer')),
-          userName: field(src, 'user.name'),
-          hostName: field(src, 'host.name'),
-        };
+      const { data } = await es.post(alertsPath, {
+        size,
+        sort: [{ '@timestamp': 'asc' }],
+        query: { bool: { must } },
       });
+      return (data?.hits?.hits || []).map((hit) => toAlert(hit));
     },
 
     /**
@@ -173,49 +173,48 @@ function createElasticClient(apiKey) {
       if (hostName) filter.push({ term: { 'host.name': hostName } });
       if (userName) filter.push({ term: { 'user.name': userName } });
 
-      const { data } = await es.post(
-        `/${encodeURIComponent(config.elastic.alertsIndex)}/_search`,
-        {
-          size: 0,
-          track_total_hits: true,
-          query: { bool: { filter } },
-          aggs: {
-            // Pull more rules than we display: the "noisiest" list re-ranks this same bucket set client-side
-            rules: {
-              terms: { field: 'kibana.alert.rule.name', size: Math.max(topN * 3, 30) },
-              aggs: {
-                hosts: { cardinality: { field: 'host.name' } },
-                users: { cardinality: { field: 'user.name' } },
-                risk: { avg: { field: 'kibana.alert.risk_score' } },
-                last_seen: { max: { field: '@timestamp' } },
-                // Alerts attached to a case carry kibana.alert.case_ids - our in-index signal that an analyst thought the alert mattered enough to make a case
-                in_cases: { filter: { exists: { field: 'kibana.alert.case_ids' } } },
-              },
-            },
-            severities: { terms: { field: 'kibana.alert.severity', size: 5 } },
-            workflow: { terms: { field: 'kibana.alert.workflow_status', size: 5 } },
-            hosts: { terms: { field: 'host.name', size: topN } },
-            users: { terms: { field: 'user.name', size: topN } },
-            processes: { terms: { field: config.stats.processField, size: topN } },
-            spaces: { terms: { field: 'kibana.space_ids', size: topN } },
-            rule_count: { cardinality: { field: 'kibana.alert.rule.name' } },
-            host_count: { cardinality: { field: 'host.name' } },
-            user_count: { cardinality: { field: 'user.name' } },
-            risk: { stats: { field: 'kibana.alert.risk_score' } },
-            in_cases: { filter: { exists: { field: 'kibana.alert.case_ids' } } },
-            // Hourly buckets in the operator's timezone. Hour-of-day and day-of-week are folded out of these client-side, which keeps the query free of runtime scripts
-            over_time: {
-              date_histogram: {
-                field: '@timestamp',
-                calendar_interval: 'hour',
-                time_zone: timeZone,
-                format: "yyyy-MM-dd'T'HH",
-                min_doc_count: 0,
-              },
+      const { data } = await es.post(alertsPath, {
+        size: 0,
+        track_total_hits: true,
+        query: { bool: { filter } },
+        aggs: {
+          // Pull more rules than we display: the "noisiest" list re-ranks this same bucket set client-side
+          rules: {
+            terms: { field: 'kibana.alert.rule.name', size: Math.max(topN * 3, 30) },
+            aggs: {
+              hosts: { cardinality: { field: 'host.name' } },
+              users: { cardinality: { field: 'user.name' } },
+              risk: { avg: { field: 'kibana.alert.risk_score' } },
+              last_seen: { max: { field: '@timestamp' } },
+              // Alerts attached to a case carry kibana.alert.case_ids - our in-index signal that an analyst thought the alert mattered enough to make a case
+              in_cases: { filter: { exists: { field: 'kibana.alert.case_ids' } } },
             },
           },
-        }
-      );
+          severities: { terms: { field: 'kibana.alert.severity', size: 5 } },
+          workflow: { terms: { field: 'kibana.alert.workflow_status', size: 5 } },
+          hosts: { terms: { field: 'host.name', size: topN } },
+          users: { terms: { field: 'user.name', size: topN } },
+          processes: { terms: { field: config.stats.processField, size: topN } },
+          spaces: { terms: { field: 'kibana.space_ids', size: topN } },
+          rule_count: { cardinality: { field: 'kibana.alert.rule.name' } },
+          host_count: { cardinality: { field: 'host.name' } },
+          user_count: { cardinality: { field: 'user.name' } },
+          risk: { stats: { field: 'kibana.alert.risk_score' } },
+          in_cases: { filter: { exists: { field: 'kibana.alert.case_ids' } } },
+          // Hourly buckets in the operator's timezone. Hour-of-day and day-of-week
+          // are folded out of these client-side, which keeps the query free of
+          // runtime scripts
+          over_time: {
+            date_histogram: {
+              field: '@timestamp',
+              calendar_interval: 'hour',
+              time_zone: timeZone,
+              format: "yyyy-MM-dd'T'HH",
+              min_doc_count: 0,
+            },
+          },
+        },
+      });
       return data;
     },
 
@@ -278,9 +277,53 @@ function createElasticClient(apiKey) {
   };
 }
 
-// Shared client for non-user operations (watchers, space lookups)
-const serviceClient = config.elastic.serviceApiKey
-  ? createElasticClient(config.elastic.serviceApiKey)
-  : null;
+/*
+ * Clients are cached per API key rather than rebuilt on every command. The TTL
+ * bounds how long a revoked key keeps a working client; the cap bounds memory.
+ *
+ * The cache key is a secret. It stays in memory and is never logged - TtlCache
+ * exposes `size`, never its keys
+ */
+const clientCache = new TtlCache({
+  ttlMs: config.cache.clientTtlMs,
+  max: config.cache.maxClients,
+});
 
-module.exports = { createElasticClient, serviceClient, ownerFromConsumer, field };
+function createElasticClient(apiKey) {
+  if (!apiKey) throw new Error('An Elastic API key is required to build a client.');
+  return clientCache.getOrCreate(apiKey, buildElasticClient);
+}
+
+/** Drop a cached client, e.g. when an analyst re-registers with a new key */
+function invalidateClient(apiKey) {
+  return clientCache.delete(apiKey);
+}
+
+/*
+ * Lazy service client for non-user operations (watchers, space lookups).
+ */
+let _serviceClient;
+
+function getServiceClient() {
+  if (_serviceClient !== undefined) return _serviceClient;
+  _serviceClient = config.elastic.serviceApiKey
+    ? buildElasticClient(config.elastic.serviceApiKey)
+    : null;
+  return _serviceClient;
+}
+
+/** Drop the cached service client, e.g. after a key rotation */
+function resetServiceClient() {
+  _serviceClient = undefined;
+}
+
+module.exports = {
+  createElasticClient,
+  buildElasticClient,
+  invalidateClient,
+  getServiceClient,
+  resetServiceClient,
+  ownerFromConsumer,
+  toAlert,
+  field,
+};

@@ -2,52 +2,27 @@
 
 const { App } = require('@slack/bolt');
 const config = require('./config');
-const { UserStore, StateStore } = require('./src/store');
+const { validateConfig } = require('./config/validate');
+const { createContext } = require('./src/context');
 const { logger } = require('./src/util/logger');
 const { registerProcessHandlers, registerBoltErrorHandler } = require('./src/util/errorHandler');
 const createRegistrar = require('./src/slack/registrar');
-
-const registerStart = require('./src/commands/start');
-const registerCase = require('./src/commands/case');
-const registerAddAlert = require('./src/commands/add_alert');
-const registerStats = require('./src/commands/stats');
+const { registerAll } = require('./src/commands');
 const { startWatchers } = require('./src/watchers');
+
+/*
+ * Bootstrap only.
+ *
+ *   config validation > context > slack app > commands > watchers > shutdown
+ */
 
 const log = logger.child({ scope: 'app' });
 
-/** Fail fast if required configs are missing */
-function requireConfig() {
-  const missing = [];
-  if (!config.slack.botToken) missing.push('SLACK_BOT_TOKEN');
-  if (!config.slack.signingSecret) missing.push('SLACK_SIGNING_SECRET');
-  if (config.slack.socketMode && !config.slack.appToken) missing.push('SLACK_APP_TOKEN (Socket Mode)');
-  if (!config.elastic.kibanaUrl) missing.push('KIBANA_URL');
-  if (!config.elastic.esUrl) missing.push('ELASTICSEARCH_URL');
-  if (missing.length) {
-    log.fatal('missing required configuration', { missing });
-    log.fatal('copy .env.example to .env and fill it in');
-    process.exit(1);
-  }
-}
-
 async function main() {
-  requireConfig();
+  // Throws ConfigError listing everything that's wrong, not just the first
+  validateConfig(config);
 
-  if (!config.security.encryptionKey) {
-    log.warn(
-      'ELASTIBOT_SECRET_KEY is not set - analyst API keys will be stored UNENCRYPTED',
-      { scope: 'security', remedy: 'set ELASTIBOT_SECRET_KEY in .env for at-rest encryption' }
-    );
-  }
-
-  // Shared state passed to command handlers
-  const ctx = {
-    users: new UserStore({
-      filePath: config.security.userStorePath,
-      encryptionKey: config.security.encryptionKey,
-    }),
-  };
-  const state = new StateStore({ filePath: config.security.statePath });
+  const ctx = createContext();
 
   const app = new App({
     token: config.slack.botToken,
@@ -56,46 +31,61 @@ async function main() {
     appToken: config.slack.appToken,
   });
 
-  // Every command/action/view goes through the registrar, which owns ack,
-  // the "have you run /start" check, logging and error translation
+  // The registrar owns ack, the "have you run /start" check, logging and error
+  // translation. Command modules are discovered from src/commands/
   const reg = createRegistrar(app, ctx);
-  registerStart(reg);
-  registerCase(reg);
-  registerAddAlert(reg);
-  registerStats(reg);
+  registerAll(reg);
 
-  // Surface unhandled errors instead of crashing on a single bad event
   registerBoltErrorHandler(app);
 
-  const port = config.slack.port;
-  await app.start(config.slack.socketMode ? undefined : port);
+  await app.start(config.slack.socketMode ? undefined : config.slack.port);
   log.info('elastibot started', {
     mode: config.slack.socketMode ? 'socket' : 'http',
-    port: config.slack.socketMode ? undefined : port,
+    port: config.slack.socketMode ? undefined : config.slack.port,
     logLevel: logger.settings.level,
   });
 
-  const stopWatchers = startWatchers(app, state);
+  const watchers = startWatchers(app, ctx);
 
-  // Graceful shutdown
+  /*
+   * Shutdown
+   */
   let shuttingDown = false;
-  const shutdown = async (sig) => {
+  const shutdown = async (signal) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    log.info('shutting down', { signal: sig });
-    stopWatchers();
+    log.info('shutting down', { signal });
+
+    // Never let a hung dependency keep the process alive forever
+    const hardExit = setTimeout(() => {
+      log.error('shutdown timed out - exiting hard', { timeoutMs: config.shutdownTimeoutMs });
+      process.exit(1);
+    }, config.shutdownTimeoutMs);
+    hardExit.unref?.();
+
     try {
+      await watchers.stop();
       await app.stop();
+      await ctx.close();
+      log.info('shutdown complete');
+      process.exit(0);
     } catch (err) {
-      log.warn('error while stopping bolt', { err });
+      log.error('error during shutdown', { err });
+      process.exit(1);
     }
-    process.exit(0);
   };
+
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-  // Last line of defence: log anything that escapes everything above
-  registerProcessHandlers({ onFatal: () => stopWatchers() });
+  // onFatal still flushes the cursor file, so a crash
+  // doesn't cost us the alerts we already posted
+  registerProcessHandlers({
+    onFatal: async () => {
+      await watchers.stop();
+      await ctx.close();
+    },
+  });
 }
 
 main().catch((err) => {

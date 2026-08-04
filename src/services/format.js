@@ -1,6 +1,7 @@
 'use strict';
 
 const config = require('../../config');
+const { ACTIONS } = require('../constants');
 
 /** Build a Kibana link to a case, respecting space + solution */
 function caseUrl(spaceId, caseId, owner) {
@@ -183,7 +184,7 @@ function alertGroupBlocks({
         type: 'button',
         style: 'primary',
         text: { type: 'plain_text', text: count > 1 ? `Create case (${count} alerts)` : 'Create case' },
-        action_id: 'create_case_from_alert',
+        action_id: ACTIONS.CREATE_CASE_FROM_ALERT,
         value: buttonValue || alertId,
       },
     ],

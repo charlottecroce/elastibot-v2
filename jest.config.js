@@ -12,7 +12,7 @@ module.exports = {
   setupFiles: ['<rootDir>/tests/setup.js'],
   testMatch: ['<rootDir>/tests/**/*.test.js'],
   clearMocks: true,
-  collectCoverageFrom: ['src/**/*.js', '!src/watchers/**'],
+  collectCoverageFrom: ['src/**/*.js', 'config/**/*.js'],
   // Nothing here talks to a real cluster, so a slow test means a hung mock
   testTimeout: 10000,
 };
