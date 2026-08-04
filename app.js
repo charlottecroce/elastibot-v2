@@ -7,6 +7,7 @@ const { UserStore, StateStore } = require('./src/store');
 const registerStart = require('./src/commands/start');
 const registerCase = require('./src/commands/case');
 const registerAddAlert = require('./src/commands/add_alert');
+const registerStats = require('./src/commands/stats');
 const { startWatchers } = require('./src/watchers');
 
 /** Fail fast if required configs are missing */
@@ -54,6 +55,7 @@ async function main() {
   registerStart(app, ctx);
   registerCase(app, ctx);
   registerAddAlert(app, ctx);
+  registerStats(app, ctx);
 
   // Surface unhandled errors instead of crashing on a single bad event
   app.error(async (error) => {

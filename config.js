@@ -73,6 +73,23 @@ module.exports = {
     truncateRuleWords: null,
   },
 
+  stats: {
+    // Lookback used by /stats when the analyst doesn't pass one (e.g. '24h', '7d', '2w')
+    defaultWindow: process.env.STATS_DEFAULT_WINDOW || '7d',
+    // Hard cap on how far back /stats will look. Aggregations are cheap but not free
+    maxWindowDays: int(process.env.STATS_MAX_WINDOW_DAYS, 90),
+    // Timezone used to bucket alerts into hours/weekdays. 'UTC' or an IANA name like 'America/New_York'
+    timeZone: process.env.STATS_TIMEZONE || 'UTC',
+    // How many entries each "top N" list shows
+    topN: int(process.env.STATS_TOP_N, 10),
+    // A rule needs at least this many alerts in the window before /stats will
+    // call it noisy
+    noiseMinAlerts: int(process.env.STATS_NOISE_MIN_ALERTS, 10),
+    // Field holding the process/program name. Override if your alerts use a
+    // different mapping (e.g. 'process.executable')
+    processField: process.env.STATS_PROCESS_FIELD || 'process.name',
+  },
+
   watchers: {
     enabled: bool(process.env.WATCHERS_ENABLED, true),
     pollIntervalMs: int(process.env.WATCH_POLL_MS, 60000),

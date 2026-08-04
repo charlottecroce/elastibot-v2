@@ -12,6 +12,16 @@ node_modules/
 npm-debug.log*
 yarn-error.log*
 
-# Logs / OS
-*.log
+# Tests
+coverage/
+.jest-cache/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
 .DS_Store
+Thumbs.db
+
+# Logs
+*.log

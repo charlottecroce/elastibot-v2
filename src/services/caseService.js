@@ -302,5 +302,6 @@ module.exports = {
   createCaseForAlert,
   createCaseForGroup,
   addAlertToCase,
+  describeAxiosError,
   UserFacingError,
 };
