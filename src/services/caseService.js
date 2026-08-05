@@ -4,46 +4,22 @@ const config = require('../../config');
 const { createElasticClient } = require('../elastic');
 const { buildCaseTitle, monthYearTag } = require('../naming');
 const { caseUrl } = require('./format');
-
-/**
- * A friendly error whose message is safe to output into Slack
- */
-class UserFacingError extends Error {}
+const { getSpaceName } = require('./spaceService');
+const { ALERT_STATUS_FOR_CASE, DEFAULT_SPACE, UNKNOWN_RULE } = require('../constants');
+const { UserFacingError, describeAxiosError } = require('../util/errors');
+const { logger } = require('../util/logger');
 
 /*
- * Case status > the matching alert workflow status. Kibana's case syncing uses
- * the same mapping; we only apply it by hand for an alert that joins a case
- * AFTER that case's status was last changed
+ * Case creation and alert attachment. Error types come from util/errors
  */
-const ALERT_STATUS_FOR_CASE = {
-  open: 'open',
-  'in-progress': 'acknowledged',
-  closed: 'closed',
-};
+
+const log = logger.child({ scope: 'service:case' });
 
 /** Format an ECS field for the description: join arrays, fall back to N/A */
 function fmtField(value) {
   if (Array.isArray(value)) value = value.filter(Boolean).join(', ');
   if (value === undefined || value === null || value === '') return 'N/A';
   return String(value);
-}
-
-/** Turn an axios error into a user-friendly message */
-function describeAxiosError(err, context) {
-  const status = err?.response?.status;
-  const body = err?.response?.data;
-  const reason =
-    (body && (body.message || body.error?.reason || body.error)) || err.message;
-  if (status === 401 || status === 403) {
-    return new UserFacingError(
-      `${context}: Elastic rejected your API key (${status}). ` +
-        'Re-run `/start` to register a valid key with the right permissions.'
-    );
-  }
-  if (status === 404) {
-    return new UserFacingError(`${context}: not found (404). ${reason || ''}`.trim());
-  }
-  return new UserFacingError(`${context}: ${reason || 'request failed'}`.trim());
 }
 
 /** Drop duplicate alerts by id, keeping order */
@@ -73,24 +49,27 @@ function topKey(counts) {
  * to it from here on - closing the case closes its alerts
  */
 async function createCaseFromAlerts(client, alerts) {
-  const spaceId = alerts[0].spaceId || 'default';
-  const spaceName = await client.getSpaceName(spaceId);
+  const spaceId = alerts[0].spaceId || DEFAULT_SPACE;
+  const spaceName = await getSpaceName(spaceId, client);
 
   const ruleCounts = {};
   const ownerCounts = {};
   for (const a of alerts) {
-    const rn = a.ruleName || 'Unknown Rule';
+    const rn = a.ruleName || UNKNOWN_RULE;
     ruleCounts[rn] = (ruleCounts[rn] || 0) + 1;
     const ow = a.owner || config.elastic.defaultOwner;
     ownerCounts[ow] = (ownerCounts[ow] || 0) + 1;
   }
-  const representativeRule = topKey(ruleCounts) || 'Unknown Rule';
+  const representativeRule = topKey(ruleCounts) || UNKNOWN_RULE;
   const owner = topKey(ownerCounts) || config.elastic.defaultOwner;
   const repUser = alerts.find((a) => a.userName)?.userName;
   const repHost = alerts.find((a) => a.hostName)?.hostName;
 
+  // timeZone pins the title's date so the same alert yields the same case name
+  // regardless of the host's local timezone
   const title = buildCaseTitle(spaceName, representativeRule, {
     truncateRuleWords: config.naming.truncateRuleWords,
+    timeZone: config.naming.timeZone,
   });
 
   const isGroup = alerts.length > 1;
@@ -118,7 +97,7 @@ async function createCaseFromAlerts(client, alerts) {
     created = await client.createCase(spaceId, {
       title,
       description,
-      tags: ['elastibot', monthYearTag()],
+      tags: ['elastibot', monthYearTag(new Date(), config.naming.timeZone)],
       connector: { id: 'none', name: 'none', type: '.none', fields: null },
       settings: { syncAlerts: true },
       owner,
@@ -161,6 +140,17 @@ async function createCaseFromAlerts(client, alerts) {
     );
   }
 
+  // Partial failures are reported to the analyst in the Slack message, and
+  // logged here so there's a record after that message scrolls away
+  if (failures.length) {
+    log.warn('some alerts did not attach', {
+      caseId,
+      spaceId,
+      attached,
+      failed: alerts.length - attached,
+    });
+  }
+
   return {
     caseId,
     title,
@@ -181,7 +171,7 @@ async function createCaseFromAlerts(client, alerts) {
  * Files just the given alert into a case - no sibling gathering. The grouped
  * "Create case" button uses createCaseForGroup to combine a whole incident
  *
- * @param {string} apiKey    // the analyst's Elastic API key
+ * @param {string} apiKey    the analyst's Elastic API key
  * @param {string} alertId
  */
 async function createCaseForAlert(apiKey, alertId) {
@@ -229,6 +219,16 @@ async function createCaseForGroup(apiKey, { spaceId, userName, hostName, from, t
     );
   }
 
+  // Hitting the cap means the case holds only part of the incident
+  if (alerts.length >= config.grouping.maxAlertsPerCase) {
+    log.warn('group hit the alert cap - the case may not contain the whole incident', {
+      spaceId,
+      userName,
+      hostName,
+      cap: config.grouping.maxAlertsPerCase,
+    });
+  }
+
   return createCaseFromAlerts(client, alerts);
 }
 
@@ -259,10 +259,10 @@ async function addAlertToCase(apiKey, caseId, alertId) {
     existingCase = await client.getCase(alert.spaceId, caseId);
   } catch (err) {
     const e = describeAxiosError(err, 'Looking up case');
-    if (/not found/i.test(e.message)) {
+    if (e.status === 404) {
       throw new UserFacingError(
         `Could not find case \`${caseId}\` in space \`${alert.spaceId}\`. ` +
-          'Double-check the case ID from Elastibot\'s creation message.'
+          "Double-check the case ID from Elastibot's creation message."
       );
     }
     throw e;
@@ -286,7 +286,13 @@ async function addAlertToCase(apiKey, caseId, alertId) {
     try {
       await client.setAlertsWorkflowStatus(alert.spaceId, [alert.id], desired);
     } catch (err) {
-      console.error('[add_alert] status sync failed:', err.response?.status || err.message);
+      // Non-fatal: the alert is on the case, it just didn't inherit the status
+      log.warn('alert status sync failed - alert is attached but status not inherited', {
+        err,
+        caseId,
+        alertId: alert.id,
+        desired,
+      });
     }
   }
 
@@ -302,5 +308,4 @@ module.exports = {
   createCaseForAlert,
   createCaseForGroup,
   addAlertToCase,
-  UserFacingError,
 };

@@ -24,6 +24,10 @@ features:
       description: Add an alert to an existing case
       usage_hint: "[caseID] [alertID]"
       should_escape: false
+    - command: /stats
+      description: Aggregate view of the alerts index - top and noisiest rules, hosts, users, timing
+      usage_hint: "[window] [filters] [share]"
+      should_escape: false
 
 oauth_config:
   scopes:

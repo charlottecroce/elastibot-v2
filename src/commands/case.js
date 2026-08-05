@@ -1,78 +1,55 @@
 'use strict';
 
-const {
-  createCaseForAlert,
-  createCaseForGroup,
-  UserFacingError,
-} = require('../services/caseService');
+const { createCaseForAlert, createCaseForGroup } = require('../services/caseService');
 const { caseCreatedBlocks } = require('../services/format');
 const { decodeGroupValue } = require('../grouping');
+const { ACTIONS, COMMANDS } = require('../constants');
 
 /*
  * /case (alertID)
- *   Creates a case for the alert in the alert's space, titled per the naming
- *   scheme, and attaches the alert. If the alert has a user + host, sibling alerts
- *   within the grouping window are pulled in and filed into the same case.
- *   Reply is posted in-channel so the team sees the new case ID
+ *   Creates a case for THAT ONE ALERT in the alert's own space, titled per the
+ *   naming scheme, and attaches it.
  *
  * Also registers the "Create case" button the alert watcher attaches to its
- * notifications - it files the whole incident (all correlated alerts) into one case
+ * notifications. That path is the one that groups: for a correlated incident it
+ * re-runs the user+host+time-range query and files the whole burst into a single
+ * case
  */
 
-const NEED_START =
-  'You need to connect first. Run `/start <kibana_username>` to register your Elastic API key.';
-
-module.exports = function registerCase(app, ctx) {
-  app.command('/case', async ({ command, ack, respond }) => {
-    await ack();
-    const alertId = (command.text || '').trim().split(/\s+/)[0];
-
-    if (!alertId) {
-      await respond({
-        response_type: 'ephemeral',
-        text: 'Usage: `/case <alertID>`',
-      });
-      return;
-    }
-
-    const user = ctx.users.get(command.user_id);
-    if (!user) {
-      await respond({ response_type: 'ephemeral', text: NEED_START });
-      return;
-    }
-
-    try {
+module.exports = function registerCase(reg) {
+  reg.command(
+    COMMANDS.CASE,
+    async ({ argv, user, reply, slackUserId, log }) => {
+      const alertId = argv[0];
       const result = await createCaseForAlert(user.apiKey, alertId);
-      await respond({
-        response_type: 'in_channel',
-        blocks: caseCreatedBlocks({ ...result, slackUserId: command.user_id }),
+
+      log.info('case created', {
+        caseId: result.caseId,
+        alertCount: result.alertCount ?? 1,
+        spaceName: result.spaceName,
+      });
+
+      await reply.inChannel({
+        blocks: caseCreatedBlocks({ ...result, slackUserId }),
         text: `Case created: ${result.title} (${result.caseId})`,
       });
-    } catch (err) {
-      const msg = err instanceof UserFacingError ? err.message : `Unexpected error: ${err.message}`;
-      await respond({ response_type: 'ephemeral', text: `:x: ${msg}` });
+    },
+    {
+      requireUser: true,
+      usage: 'Usage: `/case <alertID>`',
+      minArgs: 1,
     }
-  });
+  );
 
   // Button on watcher alert notifications - creates ONE case for the whole
-  // incident (all correlated alerts), not just the alert that was clicked
-  app.action('create_case_from_alert', async ({ ack, body, action, client }) => {
-    await ack();
-    const slackUserId = body.user.id;
+  // incident (all correlated alerts), not just the alert that was clicked.
+  // action_id is the same constant services/format.js stamps on the button
+  reg.action(
+    ACTIONS.CREATE_CASE_FROM_ALERT,
+    async ({ action, user, reply, slackUserId, log }) => {
+      const desc = decodeGroupValue(action.value);
+      log.debug('create-case button', { kind: desc.k, space: desc.s });
 
-    const user = ctx.users.get(slackUserId);
-    if (!user) {
-      await client.chat.postEphemeral({
-        channel: body.channel.id,
-        user: slackUserId,
-        text: NEED_START,
-      });
-      return;
-    }
-
-    const desc = decodeGroupValue(action.value);
-
-    try {
       const result =
         desc.k === 'g'
           ? await createCaseForGroup(user.apiKey, {
@@ -84,14 +61,16 @@ module.exports = function registerCase(app, ctx) {
             })
           : await createCaseForAlert(user.apiKey, desc.a);
 
-      await client.chat.postMessage({
-        channel: body.channel.id,
+      log.info('case created from button', {
+        caseId: result.caseId,
+        alertCount: result.alertCount ?? 1,
+      });
+
+      await reply.inChannel({
         blocks: caseCreatedBlocks({ ...result, slackUserId }),
         text: `Case created: ${result.title} (${result.caseId})`,
       });
-    } catch (err) {
-      const msg = err instanceof UserFacingError ? err.message : `Unexpected error: ${err.message}`;
-      await client.chat.postEphemeral({ channel: body.channel.id, user: slackUserId, text: `:x: ${msg}` });
-    }
-  });
+    },
+    { requireUser: true }
+  );
 };

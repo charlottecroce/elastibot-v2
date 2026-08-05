@@ -2,46 +2,43 @@
 
 const { App } = require('@slack/bolt');
 const config = require('./config');
-const { UserStore, StateStore } = require('./src/store');
-
-const registerStart = require('./src/commands/start');
-const registerCase = require('./src/commands/case');
-const registerAddAlert = require('./src/commands/add_alert');
+const { validateConfig } = require('./config/validate');
+const { createContext } = require('./src/context');
+const { logger } = require('./src/util/logger');
+const { registerProcessHandlers, registerBoltErrorHandler } = require('./src/util/errorHandler');
+const createRegistrar = require('./src/slack/registrar');
+const { registerAll } = require('./src/commands');
 const { startWatchers } = require('./src/watchers');
 
-/** Fail fast if required configs are missing */
-function requireConfig() {
-  const missing = [];
-  if (!config.slack.botToken) missing.push('SLACK_BOT_TOKEN');
-  if (!config.slack.signingSecret) missing.push('SLACK_SIGNING_SECRET');
-  if (config.slack.socketMode && !config.slack.appToken) missing.push('SLACK_APP_TOKEN (Socket Mode)');
-  if (!config.elastic.kibanaUrl) missing.push('KIBANA_URL');
-  if (!config.elastic.esUrl) missing.push('ELASTICSEARCH_URL');
-  if (missing.length) {
-    console.error('Missing required configuration:\n  - ' + missing.join('\n  - '));
-    console.error('\nCopy .env.example to .env and fill it in.');
-    process.exit(1);
-  }
-}
+/*
+ * Bootstrap only.
+ *
+ *   process handlers > config validation > context > slack app > commands > watchers > shutdown
+ */
+
+const log = logger.child({ scope: 'app' });
 
 async function main() {
-  requireConfig();
+  // Registered first so it covers everything below. Hooks are collected as the
+  // pieces they clean up come into existence
+  const fatalHooks = [];
+  registerProcessHandlers({
+    onFatal: async () => {
+      for (const hook of fatalHooks) {
+        try {
+          await hook();
+        } catch {
+          /* best effort during a fatal exit */
+        }
+      }
+    },
+  });
 
-  if (!config.security.encryptionKey) {
-    console.warn(
-      '[security] ELASTIBOT_SECRET_KEY is not set - analyst API keys will be stored ' +
-        'UNENCRYPTED. Set it in .env for at-rest encryption.'
-    );
-  }
+  // Throws ConfigError listing everything that's wrong, not just the first
+  validateConfig(config);
 
-  // Shared state passed to command handlers
-  const ctx = {
-    users: new UserStore({
-      filePath: config.security.userStorePath,
-      encryptionKey: config.security.encryptionKey,
-    }),
-  };
-  const state = new StateStore({ filePath: config.security.statePath });
+  const ctx = createContext();
+  fatalHooks.push(() => ctx.close());
 
   const app = new App({
     token: config.slack.botToken,
@@ -50,40 +47,58 @@ async function main() {
     appToken: config.slack.appToken,
   });
 
-  // Register slash commands and interactive handlers
-  registerStart(app, ctx);
-  registerCase(app, ctx);
-  registerAddAlert(app, ctx);
+  // The registrar owns ack, the "have you run /start" check, logging and error
+  // translation. Command modules are discovered from src/commands/
+  const reg = createRegistrar(app, ctx);
+  registerAll(reg);
 
-  // Surface unhandled errors instead of crashing on a single bad event
-  app.error(async (error) => {
-    console.error('[bolt] uncaught error:', error);
-  });
+  registerBoltErrorHandler(app);
 
-  const port = config.slack.port;
-  await app.start(config.slack.socketMode ? undefined : port);
-  console.log(
-    `Elastibot is running (${config.slack.socketMode ? 'Socket Mode' : `HTTP :${port}`}).`
-  );
+  // Declared before app.start() so a SIGTERM during startup still takes the
+  // graceful path. Same shape as a real runner, so nothing has to null-check it
+  let watchers = { stop: async () => {}, isRunning: () => false };
+  let shuttingDown = false;
 
-  const stopWatchers = startWatchers(app, state);
+  const shutdown = async (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    log.info('shutting down', { signal });
 
-  // Graceful shutdown
-  const shutdown = async (sig) => {
-    console.log(`\n${sig} received — shutting down.`);
-    stopWatchers();
+    // Never let a hung dependency keep the process alive forever
+    const hardExit = setTimeout(() => {
+      log.error('shutdown timed out - exiting hard', { timeoutMs: config.shutdownTimeoutMs });
+      process.exit(1);
+    }, config.shutdownTimeoutMs);
+    hardExit.unref?.();
+
     try {
+      await watchers.stop();
       await app.stop();
-    } catch {
-      /* ignore */
+      await ctx.close();
+      log.info('shutdown complete');
+      process.exit(0);
+    } catch (err) {
+      log.error('error during shutdown', { err });
+      process.exit(1);
     }
-    process.exit(0);
   };
+
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+  await app.start(config.slack.socketMode ? undefined : config.slack.port);
+  log.info('elastibot started', {
+    mode: config.slack.socketMode ? 'socket' : 'http',
+    port: config.slack.socketMode ? undefined : config.slack.port,
+    logLevel: logger.settings.level,
+  });
+
+  watchers = startWatchers(app, ctx);
+  // Stop polling before flushing the stores, so the cursor written is final
+  fatalHooks.unshift(() => watchers.stop());
 }
 
 main().catch((err) => {
-  console.error('Fatal startup error:', err);
+  log.fatal('fatal startup error', { err });
   process.exit(1);
 });
