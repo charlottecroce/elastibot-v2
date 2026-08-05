@@ -1,21 +1,41 @@
 {
-    "root": true,
-    "env": { "node": true, "es2022": true, "jest": true },
-    "parserOptions": { "ecmaVersion": 2022, "sourceType": "script" },
-    "extends": "eslint:recommended",
-    "rules": {
-      "no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
-      "no-console": "error",
-      "eqeqeq": ["error", "smart"],
-      "no-var": "error",
-      "prefer-const": "error",
-      "no-return-await": "error",
-      "require-atomic-updates": "off"
-    },
-    "overrides": [
+  "root": true,
+  "env": {
+    "node": true,
+    "es2022": true,
+    "jest": true
+  },
+  "parserOptions": {
+    "ecmaVersion": 2022,
+    "sourceType": "script"
+  },
+  "extends": "eslint:recommended",
+  "rules": {
+    "no-unused-vars": [
+      "error",
       {
-        "files": ["tests/**/*.js"],
-        "rules": { "no-console": "off" }
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_"
       }
-    ]
-  }
+    ],
+    "no-console": "error",
+    "eqeqeq": [
+      "error",
+      "smart"
+    ],
+    "no-var": "error",
+    "prefer-const": "error",
+    "no-return-await": "error",
+    "require-atomic-updates": "error"
+  },
+  "overrides": [
+    {
+      "files": [
+        "tests/**/*.js"
+      ],
+      "rules": {
+        "no-console": "off"
+      }
+    }
+  ]
+}

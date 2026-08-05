@@ -1,6 +1,7 @@
 'use strict';
 
 const config = require('../../config');
+const { VIEWS, COMMANDS } = require('../constants');
 
 /*
  * /start (kibana_username)
@@ -9,18 +10,16 @@ const config = require('../../config');
  *   On submit we store  slackUserId > { kibanaUsername, apiKey }  so future
  *   cases are created under that analyst's identity.
  *
- * Note the modal submission acks itself - it uses response_action to surface a
+ * The modal submission acks itself - it uses response_action to surface a
  * validation error inside the modal - so it's registered with the view helper,
  * which skips the automatic ack but still wraps the handler in logging and
  * central error handling
  */
 
-const CALLBACK_ID = 'elastibot_start_submit';
-
 function startModalView(kibanaUsername) {
   return {
     type: 'modal',
-    callback_id: CALLBACK_ID,
+    callback_id: VIEWS.START_SUBMIT,
     // carry the typed username through to the submission handler
     private_metadata: JSON.stringify({ kibanaUsername }),
     title: { type: 'plain_text', text: 'Connect to Elastic' },
@@ -77,7 +76,7 @@ function startModalView(kibanaUsername) {
 
 module.exports = function registerStart(reg) {
   reg.command(
-    '/start',
+    COMMANDS.START,
     async ({ command, client, text, log }) => {
       await client.views.open({
         trigger_id: command.trigger_id,
@@ -91,8 +90,9 @@ module.exports = function registerStart(reg) {
     }
   );
 
-  reg.view(CALLBACK_ID, async ({ ack, view, client, ctx, slackUserId, log }) => {
-    const apiKey = (view.state.values.apikey_block.apikey_input.value || '').trim();
+  reg.view(VIEWS.START_SUBMIT, async ({ ack, view, client, ctx, slackUserId, log }) => {
+    // Slack omits state.values entries for blocks it considers empty
+    const apiKey = String(view?.state?.values?.apikey_block?.apikey_input?.value ?? '').trim();
 
     if (!apiKey) {
       await ack({
@@ -132,11 +132,10 @@ module.exports = function registerStart(reg) {
               'unencrypted. Ask your admin to enable at-rest encryption.'),
       });
     } catch (err) {
-      // DM may fail if the user hasn't opened the app DM; non-fatal, but worth a line
+      // DM may fail if the user hasn't opened the app DM; non-fatal
       log.debug('confirmation DM not delivered', { err });
     }
   });
 };
 
 module.exports.startModalView = startModalView;
-module.exports.CALLBACK_ID = CALLBACK_ID;

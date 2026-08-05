@@ -1,12 +1,12 @@
 'use strict';
 
 const config = require('../../config');
-const { ACTIONS } = require('../constants');
+const { ACTIONS, DEFAULT_SPACE } = require('../constants');
 
 /** Build a Kibana link to a case, respecting space + solution */
 function caseUrl(spaceId, caseId, owner) {
   const base = (config.elastic.kibanaPublicUrl || config.elastic.kibanaUrl || '').replace(/\/$/, '');
-  const sp = spaceId && spaceId !== 'default' ? `/s/${encodeURIComponent(spaceId)}` : '';
+  const sp = spaceId && spaceId !== DEFAULT_SPACE ? `/s/${encodeURIComponent(spaceId)}` : '';
   const id = encodeURIComponent(caseId);
   if (owner === 'securitySolution') return `${base}${sp}/app/security/cases/${id}`;
   if (owner === 'observability') return `${base}${sp}/app/observability/cases/${id}`;
@@ -47,6 +47,13 @@ function num(n) {
   return String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
+/** Largest value in a list, without spreading it onto the call stack */
+function maxOf(values) {
+  let max = 0;
+  for (const v of values) if (v > max) max = v;
+  return max;
+}
+
 /** Fixed-width bar, e.g. "█████     " */
 function bar(value, max, width = 10) {
   const filled = max > 0 ? Math.round((value / max) * width) : 0;
@@ -56,7 +63,7 @@ function bar(value, max, width = 10) {
 /** One-line histogram of a series, e.g. "▁▂▄█▅▂▁" */
 function sparkline(values) {
   const ticks = '▁▂▃▄▅▆▇█';
-  const max = Math.max(...values, 0);
+  const max = maxOf(values);
   if (!max) return ticks[0].repeat(values.length);
   return values
     .map((v) => (v === 0 ? ' ' : ticks[Math.min(ticks.length - 1, Math.ceil((v / max) * (ticks.length - 1)))]))
@@ -69,10 +76,10 @@ function sparkline(values) {
  */
 function countTable(items, { barWidth = 10, labelWidth = 34 } = {}) {
   if (!items || !items.length) return '_nothing in this window_';
-  const max = Math.max(...items.map((i) => i.count));
+  const max = maxOf(items.map((i) => i.count));
   const labels = items.map((i) => plain(i.label, labelWidth));
-  const nameW = Math.max(...labels.map((l) => l.length));
-  const countW = Math.max(...items.map((i) => num(i.count).length));
+  const nameW = maxOf(labels.map((l) => l.length));
+  const countW = maxOf(items.map((i) => num(i.count).length));
   const lines = items.map((i, idx) => {
     const row = `${labels[idx].padEnd(nameW)}  ${num(i.count).padStart(countW)}  ${bar(i.count, max, barWidth)}`;
     return i.note ? `${row}  ${plain(i.note, 40)}` : row;

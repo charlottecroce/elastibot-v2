@@ -36,9 +36,7 @@ const LEVEL_NAMES = Object.keys(LEVELS).filter((l) => l !== 'silent');
 
 const REDACTED = '[redacted]';
 
-/*
- * Any field whose NAME looks secret is replaced wholesale.
- */
+// Any field whose NAME looks secret is replaced wholesale
 const SECRET_KEY_RE =
   /(api[-_]?key|token|secret|password|passwd|authorization|credential|encryptionkey|signing)/i;
 
@@ -156,6 +154,13 @@ function formatJson(rec) {
   return JSON.stringify(rec);
 }
 
+function indent(text) {
+  return String(text)
+    .split('\n')
+    .map((l) => `    ${l}`)
+    .join('\n');
+}
+
 function formatPretty(rec, { color }) {
   const c = (code, s) => (color ? `${code}${s}${COLORS.reset}` : s);
   const time = rec.time.slice(11, 23); // HH:MM:SS.mmm
@@ -176,13 +181,6 @@ function formatPretty(rec, { color }) {
   return line;
 }
 
-function indent(text) {
-  return String(text)
-    .split('\n')
-    .map((l) => `    ${l}`)
-    .join('\n');
-}
-
 // ---------------------------------------------------------------------------
 // Logger
 // ---------------------------------------------------------------------------
@@ -194,16 +192,12 @@ function indent(text) {
 function resolveSettings() {
   let cfg = {};
   try {
-    // Required lazily and defensively: the logger must survive config throwing
     cfg = require('../../config').logging || {};
   } catch {
     /* config unavailable or still loading - fall back to env */
   }
 
-  let level = process.env.LOG_LEVEL || cfg.level;
-  // Test runs are silent unless the developer explicitly asks for output
-  if (!level && process.env.NODE_ENV === 'test') level = 'silent';
-  if (!level) level = 'info';
+  let level = process.env.LOG_LEVEL || cfg.level || 'info';
   if (!(level in LEVELS)) level = 'info';
 
   const format = process.env.LOG_FORMAT || cfg.format || 'pretty';
@@ -212,7 +206,20 @@ function resolveSettings() {
   return { level, format, redact: redactEnabled };
 }
 
+// One process-wide settings object, resolved on first use. Loggers created with
+// `settings = null` follow it, so setLevel() on the root reaches every child
+let sharedSettings = null;
+function getSharedSettings() {
+  if (!sharedSettings) sharedSettings = resolveSettings();
+  return sharedSettings;
+}
+
 class Logger {
+  /**
+   * @param {object} bindings fields stamped on every record
+   * @param {object|null} settings null = follow the process-wide settings
+   * @param {function|null} sink receives records instead of stdout/stderr
+   */
   constructor(bindings = {}, settings = null, sink = null) {
     this.bindings = bindings;
     this._settings = settings;
@@ -220,8 +227,7 @@ class Logger {
   }
 
   get settings() {
-    if (!this._settings) this._settings = resolveSettings();
-    return this._settings;
+    return this._settings || getSharedSettings();
   }
 
   /** Derive a logger that stamps extra fields on every record (e.g. a scope) */
@@ -280,7 +286,10 @@ for (const level of LEVEL_NAMES) {
   };
 }
 
-/** Build an independent logger - handy for tests (pass a sink to capture records) */
+/**
+ * Build an independent logger with its own settings - handy for tests
+ * (pass a sink to capture records). Detached from the shared settings object
+ */
 function createLogger({ bindings = {}, sink = null, ...overrides } = {}) {
   const settings = { ...resolveSettings(), ...overrides };
   return new Logger(bindings, settings, sink);

@@ -3,6 +3,7 @@
 const { createCaseForAlert, createCaseForGroup } = require('../services/caseService');
 const { caseCreatedBlocks } = require('../services/format');
 const { decodeGroupValue } = require('../grouping');
+const { ACTIONS, COMMANDS } = require('../constants');
 
 /*
  * /case (alertID)
@@ -17,9 +18,9 @@ const { decodeGroupValue } = require('../grouping');
 
 module.exports = function registerCase(reg) {
   reg.command(
-    '/case',
-    async ({ args, user, reply, slackUserId, log }) => {
-      const alertId = args[0];
+    COMMANDS.CASE,
+    async ({ argv, user, reply, slackUserId, log }) => {
+      const alertId = argv[0];
       const result = await createCaseForAlert(user.apiKey, alertId);
 
       log.info('case created', {
@@ -41,9 +42,10 @@ module.exports = function registerCase(reg) {
   );
 
   // Button on watcher alert notifications - creates ONE case for the whole
-  // incident (all correlated alerts), not just the alert that was clicked
+  // incident (all correlated alerts), not just the alert that was clicked.
+  // action_id is the same constant services/format.js stamps on the button
   reg.action(
-    'create_case_from_alert',
+    ACTIONS.CREATE_CASE_FROM_ALERT,
     async ({ action, user, reply, slackUserId, log }) => {
       const desc = decodeGroupValue(action.value);
       log.debug('create-case button', { kind: desc.k, space: desc.s });

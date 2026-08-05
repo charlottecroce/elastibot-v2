@@ -11,12 +11,13 @@ const { logger } = require('../util/logger');
  * Polls the Kibana Cases _find API per configured space and posts anything
  * created since the saved per-space cursor. Cases come back newest-first, so we
  * filter then re-sort ascending to post in the order they happened
+ *
+ * `cursors` is a copy of the stored object, so mutating it here is local until
+ * it goes back through state.set
  */
 
 const log = logger.child({ scope: 'watcher:cases' });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-const PER_PAGE = 25;
 
 /**
  * @param {object} deps  same shape as pollAlerts
@@ -24,6 +25,7 @@ const PER_PAGE = 25;
  */
 async function pollCases({ slack, state, elastic, spaces, channelFor }) {
   const result = { posted: 0, failed: 0 };
+  const perPage = config.watchers.cases.perPage;
   const cursors = state.get(STATE_KEYS.CASES_LAST_TS, {});
   let cursorsChanged = false;
 
@@ -37,7 +39,7 @@ async function pollCases({ slack, state, elastic, spaces, channelFor }) {
 
     let cases;
     try {
-      cases = await elastic.findRecentCases(spaceId, PER_PAGE);
+      cases = await elastic.findRecentCases(spaceId, perPage);
     } catch (err) {
       spaceLog.error('case query failed - cursor not advanced', { err });
       continue;
@@ -45,7 +47,9 @@ async function pollCases({ slack, state, elastic, spaces, channelFor }) {
 
     const since = cursors[spaceId] || null;
 
-    // First run for this space: start from newest, don't backfill (cases are desc)
+    // First run for this space: start from newest, don't backfill (cases are
+    // desc). With no cases at all we fall back to local time, which is a
+    // different clock from Kibana's
     if (!since) {
       cursors[spaceId] = cases.length ? cases[0].created_at : new Date().toISOString();
       cursorsChanged = true;
@@ -61,10 +65,10 @@ async function pollCases({ slack, state, elastic, spaces, channelFor }) {
     if (!fresh.length) continue;
     spaceLog.info('new cases', { count: fresh.length, since });
 
-    if (fresh.length >= PER_PAGE) {
+    if (fresh.length >= perPage) {
       spaceLog.warn('every case on the page was new - some may have been missed', {
-        perPage: PER_PAGE,
-        remedy: 'lower WATCH_POLL_MS for this space',
+        perPage,
+        remedy: 'raise WATCH_CASES_PER_PAGE or lower WATCH_POLL_MS for this space',
       });
     }
 

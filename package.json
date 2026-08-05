@@ -7,7 +7,7 @@
     "start": "node app.js",
     "dev": "node --watch app.js",
     "check": "npm run lint && npm run check:syntax",
-    "check:syntax": "node -e \"const{execFileSync}=require('child_process'),fs=require('fs'),p=require('path');const walk=d=>fs.readdirSync(d,{withFileTypes:true}).flatMap(e=>e.name==='node_modules'||e.name.startsWith('.')?[]:e.isDirectory()?walk(p.join(d,e.name)):e.name.endsWith('.js')?[p.join(d,e.name)]:[]);const f=walk('.');f.forEach(x=>execFileSync(process.execPath,['--check',x]));console.log('syntax ok: '+f.length+' files')\"",
+    "check:syntax": "node scripts/check-syntax.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "jest",

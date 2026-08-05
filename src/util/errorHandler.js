@@ -57,7 +57,7 @@ async function handleHandlerError(err, { log = rootLogger, reply, traceId, userE
 
 /**
  * Bolt's own catch-all, for anything that escapes our wrappers (middleware,
- * deserialization) 
+ * deserialization)
  */
 function registerBoltErrorHandler(app, log = rootLogger.child({ scope: 'bolt' })) {
   app.error(async (error) => {
@@ -66,7 +66,8 @@ function registerBoltErrorHandler(app, log = rootLogger.child({ scope: 'bolt' })
 }
 
 /**
- * Process-level safety net.
+ * Process-level safety net. Register this before anything that can throw
+ * asynchronously.
  *
  * An unhandled rejection is logged and survived - one bad watcher tick or a
  * dropped promise shouldn't take the bot down mid-shift. An uncaught exception
@@ -102,8 +103,9 @@ function registerProcessHandlers({
       .finally(() => process.exit(1));
   });
 
+  // Deprecations and MaxListenersExceededWarning land here. Shape only, at debug
   process.on('warning', (warning) => {
-    log.warn('node warning', { err: warning });
+    log.debug('node warning', { name: warning.name, message: warning.message });
   });
 }
 

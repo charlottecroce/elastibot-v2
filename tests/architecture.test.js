@@ -20,7 +20,7 @@ describe('TtlCache', () => {
     cache.set('a', 1);
     expect(cache.get('a')).toBe(1);
     await wait(45);
-    expect(cache.get('a')).toBeUndefined();
+    expect(cache.has('a')).toBe(false);
   });
 
   test('the size cap evicts the oldest entry', () => {
@@ -28,7 +28,7 @@ describe('TtlCache', () => {
     cache.set('a', 1);
     cache.set('b', 2);
     cache.set('c', 3);
-    expect(cache.get('a')).toBeUndefined();
+    expect(cache.has('a')).toBe(false);
     expect(cache.get('c')).toBe(3);
     expect(cache.size).toBe(2);
   });
@@ -128,9 +128,11 @@ describe('space service', () => {
   });
 
   test('invalidate forces a re-read after a rename', async () => {
-    const client = { getSpaceName: jest.fn()
-      .mockResolvedValueOnce('Old Name')
-      .mockResolvedValueOnce('New Name') };
+    const client = {
+      getSpaceName: jest.fn()
+        .mockResolvedValueOnce('Old Name')
+        .mockResolvedValueOnce('New Name')
+    };
     const spaces = createSpaceService({ ttlMs: 10000 });
 
     expect(await spaces.getName('soc', client)).toBe('Old Name');
@@ -213,22 +215,60 @@ describe('config validation', () => {
   /** A config that passes, which each test then breaks in one specific way */
   const valid = () => ({
     shutdownTimeoutMs: 15000,
-    slack: { botToken: 'xoxb-1', signingSecret: 's', appToken: 'xapp-1', socketMode: true, port: 3000 },
+    slack: {
+      botToken: 'xoxb-test',
+      signingSecret: 'sekrit',
+      appToken: 'xapp-test',
+      socketMode: true,
+      port: 3000,
+    },
     elastic: {
       kibanaUrl: 'https://kibana.internal:5601',
-      kibanaPublicUrl: 'https://kibana.internal:5601',
+      kibanaPublicUrl: 'https://kibana.example.com',
       esUrl: 'https://es.internal:9200',
-      serviceApiKey: 'k',
+      serviceApiKey: 'service-key',
       tlsRejectUnauthorized: true,
       requestTimeoutMs: 15000,
+      maxSockets: 50,
+      maxResponseBytes: 52428800,
+      alertsIndex: '.alerts-security.alerts-*',
+      defaultOwner: 'securitySolution',
+      retries: 2,
+      retryBaseDelayMs: 250,
     },
-    logging: { level: 'info', format: 'json', redact: true },
-    security: { encryptionKey: 'a'.repeat(32), userStorePath: './data/users.json', statePath: './data/state.json' },
-    stats: { maxWindowDays: 90, topN: 10, timeZone: 'UTC' },
+    security: {
+      encryptionKey: 'a-long-enough-test-secret-0123456789',
+      userStorePath: './data/users.json',
+      statePath: './data/state.json',
+      stateDebounceMs: 0,
+    },
+    cache: {
+      spaceNameTtlMs: 3600000,
+      clientTtlMs: 900000,
+      maxClients: 250,
+      userTtlMs: 300000,
+    },
+    grouping: { windowMs: 3600000, maxAlertsPerCase: 200 },
+    naming: { truncateRuleWords: null, timeZone: 'UTC' },
+    logging: { level: 'silent', format: 'json', redact: true },
+    stats: {
+      defaultWindow: '7d',
+      maxWindowDays: 90,
+      timeZone: 'UTC',
+      topN: 10,
+      noiseMinAlerts: 10,
+      processField: 'process.name',
+    },
     watchers: {
-      enabled: true, pollIntervalMs: 60000, jitterRatio: 0.1, fetchSize: 200, postDelayMs: 300,
-      defaultChannel: 'C1', channelRouting: {},
-      alerts: { enabled: true }, cases: { enabled: true, spaces: ['default'] },
+      enabled: true,
+      pollIntervalMs: 60000,
+      jitterRatio: 0.1,
+      fetchSize: 200,
+      postDelayMs: 300,
+      defaultChannel: 'C1',
+      channelRouting: {},
+      alerts: { enabled: true },
+      cases: { enabled: true, spaces: ['default'], perPage: 25 },
     },
   });
 

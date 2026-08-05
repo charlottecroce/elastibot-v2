@@ -3,10 +3,15 @@
 /*
  * A small TTL cache with a size cap and in-flight de-duplication.
  *
- * Deliberately not an LRU: entries expire by time, and the size cap evicts the
- * oldest insertion. Space names and API-key-keyed clients are both small, bounded
- * sets - an LRU's bookkeeping would cost more than it saves
+ * Not an LRU: entries expire by time, and the size cap evicts the oldest
+ * insertion. Space names, API-key-keyed clients and decrypted user records are
+ * all small, bounded sets
+ *
+ * `get` returns the MISS symbol on a miss, so a cached `undefined` or `null` is
+ * still a hit
  */
+
+const MISS = Symbol('cache-miss');
 
 class TtlCache {
   /**
@@ -16,6 +21,12 @@ class TtlCache {
    * @param {function} [opts.onEvict] called with (key, value) when an entry is dropped
    */
   constructor({ ttlMs, max = 500, onEvict = null } = {}) {
+    if (!Number.isFinite(ttlMs) || ttlMs < 0) {
+      throw new TypeError(`TtlCache ttlMs must be a non-negative number, got ${ttlMs}`);
+    }
+    if (!Number.isInteger(max) || max <= 0) {
+      throw new TypeError(`TtlCache max must be a positive integer, got ${max}`);
+    }
     this.ttlMs = ttlMs;
     this.max = max;
     this.onEvict = onEvict;
@@ -31,18 +42,19 @@ class TtlCache {
     return this.ttlMs > 0 && Date.now() > entry.expires;
   }
 
+  /** @returns the cached value, or the MISS symbol */
   get(key) {
     const entry = this.entries.get(key);
-    if (!entry) return undefined;
+    if (!entry) return MISS;
     if (this._expired(entry)) {
       this.delete(key);
-      return undefined;
+      return MISS;
     }
     return entry.value;
   }
 
   has(key) {
-    return this.get(key) !== undefined;
+    return this.get(key) !== MISS;
   }
 
   set(key, value) {
@@ -73,7 +85,7 @@ class TtlCache {
   /** Synchronous variant: build the value on miss */
   getOrCreate(key, factory) {
     const hit = this.get(key);
-    if (hit !== undefined) return hit;
+    if (hit !== MISS) return hit;
     return this.set(key, factory(key));
   }
 
@@ -83,16 +95,14 @@ class TtlCache {
    */
   async getOrLoad(key, loader) {
     const hit = this.get(key);
-    if (hit !== undefined) return hit;
+    if (hit !== MISS) return hit;
 
     const pending = this.inflight.get(key);
     if (pending) return pending;
 
     const promise = (async () => {
       try {
-        const value = await loader(key);
-        if (value !== undefined) this.set(key, value);
-        return value;
+        return this.set(key, await loader(key));
       } finally {
         this.inflight.delete(key);
       }
@@ -115,4 +125,4 @@ class TtlCache {
   }
 }
 
-module.exports = { TtlCache };
+module.exports = { TtlCache, MISS };

@@ -1,6 +1,7 @@
 'use strict';
 
 const config = require('../../config');
+const { CURSOR_FIELD } = require('../elastic');
 const { alertGroupBlocks } = require('../services/format');
 const { groupAlerts, encodeGroupValue } = require('../grouping');
 const { STATE_KEYS } = require('../constants');
@@ -16,6 +17,8 @@ const { logger } = require('../util/logger');
  * backfilling history, so a fresh deploy doesn't flood the channel and trip
  * Slack rate limits
  *
+ * The cursor is read from alert.cursorTimestamp, which is the field
+ * getAlertsSince filters and sorts on. alert.timestamp is a different field
  */
 
 const log = logger.child({ scope: 'watcher:alerts' });
@@ -55,12 +58,8 @@ async function pollAlerts({ slack, state, elastic, spaces, channelFor }) {
     return result;
   }
 
-  /*
-   * If we got exactly fetchSize back, there are probably more waiting. The
-   * cursor still advances to the newest one we saw, so nothing is lost - but a
-   * sustained burst means we're a poll behind, which is worth knowing before
-   * someone notices alerts arriving late
-   */
+  // A full page means there are probably more waiting. The cursor still
+  // advances to the newest one we saw, so nothing is lost
   if (alerts.length >= config.watchers.fetchSize) {
     log.warn('poll hit the fetch ceiling - alerts may be arriving faster than we post them', {
       fetchSize: config.watchers.fetchSize,
@@ -116,9 +115,44 @@ async function pollAlerts({ slack, state, elastic, spaces, channelFor }) {
     }
   }
 
-  // Advance the cursor to the newest alert we just processed
-  const newest = alerts[alerts.length - 1].timestamp;
-  if (newest) state.set(STATE_KEYS.ALERTS_LAST_TS, newest);
+  // The cursor advances past failed posts too, so those incidents are dropped
+  // rather than retried
+  if (result.failed > 0) {
+    log.error('some incidents were not posted and will not be retried', {
+      failed: result.failed,
+      posted: result.posted,
+    });
+  }
+
+  // Advance on the max cursor timestamp in the batch, not on array position
+  let newest = null;
+  for (const a of alerts) {
+    const t = a.cursorTimestamp;
+    if (!t) continue;
+    if (newest === null || Date.parse(t) > Date.parse(newest)) newest = t;
+  }
+
+  if (!newest) {
+    // Nothing usable to advance to. Holding replays the batch next tick
+    log.error('no usable cursor timestamp in the batch - cursor held, alerts WILL repeat', {
+      field: CURSOR_FIELD,
+      count: alerts.length,
+      remedy: `check that ${CURSOR_FIELD} is mapped in ALERTS_INDEX`,
+    });
+  } else if (newest === since && alerts.length >= config.watchers.fetchSize) {
+    // More than fetchSize alerts share one millisecond, so `gt` can never step
+    // past them. Move 1ms and drop the remaining ties
+    const bumped = new Date(Date.parse(newest) + 1).toISOString();
+    log.error('cursor stalled on a full page of identical timestamps - forcing it forward', {
+      since,
+      bumped,
+      fetchSize: config.watchers.fetchSize,
+      remedy: 'raise WATCH_FETCH_SIZE',
+    });
+    state.set(STATE_KEYS.ALERTS_LAST_TS, bumped);
+  } else {
+    state.set(STATE_KEYS.ALERTS_LAST_TS, newest);
+  }
 
   log.debug('alert poll complete', { ...result, cursor: newest });
   return result;

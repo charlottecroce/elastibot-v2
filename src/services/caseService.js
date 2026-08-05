@@ -5,13 +5,12 @@ const { createElasticClient } = require('../elastic');
 const { buildCaseTitle, monthYearTag } = require('../naming');
 const { caseUrl } = require('./format');
 const { getSpaceName } = require('./spaceService');
-const { ALERT_STATUS_FOR_CASE, DEFAULT_SPACE } = require('../constants');
+const { ALERT_STATUS_FOR_CASE, DEFAULT_SPACE, UNKNOWN_RULE } = require('../constants');
 const { UserFacingError, describeAxiosError } = require('../util/errors');
 const { logger } = require('../util/logger');
 
 /*
- * Case creation and alert attachment.
- *
+ * Case creation and alert attachment. Error types come from util/errors
  */
 
 const log = logger.child({ scope: 'service:case' });
@@ -51,28 +50,23 @@ function topKey(counts) {
  */
 async function createCaseFromAlerts(client, alerts) {
   const spaceId = alerts[0].spaceId || DEFAULT_SPACE;
-  // Shared TTL cache rather than a fresh Kibana round trip per case. The name
-  // goes in the case title and changes about once a year
   const spaceName = await getSpaceName(spaceId, client);
 
   const ruleCounts = {};
   const ownerCounts = {};
   for (const a of alerts) {
-    const rn = a.ruleName || 'Unknown Rule';
+    const rn = a.ruleName || UNKNOWN_RULE;
     ruleCounts[rn] = (ruleCounts[rn] || 0) + 1;
     const ow = a.owner || config.elastic.defaultOwner;
     ownerCounts[ow] = (ownerCounts[ow] || 0) + 1;
   }
-  const representativeRule = topKey(ruleCounts) || 'Unknown Rule';
+  const representativeRule = topKey(ruleCounts) || UNKNOWN_RULE;
   const owner = topKey(ownerCounts) || config.elastic.defaultOwner;
   const repUser = alerts.find((a) => a.userName)?.userName;
   const repHost = alerts.find((a) => a.hostName)?.hostName;
 
-  /*
-   * Pin the title's date to a configured zone. Without this, datePart uses the
-   * node process's local timezone, so the same alert yields a different case
-   * name depending on which region the bot happens to run in
-   */
+  // timeZone pins the title's date so the same alert yields the same case name
+  // regardless of the host's local timezone
   const title = buildCaseTitle(spaceName, representativeRule, {
     truncateRuleWords: config.naming.truncateRuleWords,
     timeZone: config.naming.timeZone,
@@ -146,8 +140,8 @@ async function createCaseFromAlerts(client, alerts) {
     );
   }
 
-  // A partial failure is reported to the analyst in the Slack message, but it
-  // also belongs in the log - otherwise the only record of it scrolls away
+  // Partial failures are reported to the analyst in the Slack message, and
+  // logged here so there's a record after that message scrolls away
   if (failures.length) {
     log.warn('some alerts did not attach', {
       caseId,
@@ -177,7 +171,7 @@ async function createCaseFromAlerts(client, alerts) {
  * Files just the given alert into a case - no sibling gathering. The grouped
  * "Create case" button uses createCaseForGroup to combine a whole incident
  *
- * @param {string} apiKey    // the analyst's Elastic API key
+ * @param {string} apiKey    the analyst's Elastic API key
  * @param {string} alertId
  */
 async function createCaseForAlert(apiKey, alertId) {
@@ -225,11 +219,7 @@ async function createCaseForGroup(apiKey, { spaceId, userName, hostName, from, t
     );
   }
 
-  /*
-   * The query is capped at maxAlertsPerCase. Hitting the cap means the incident
-   * was bigger than the case now reflects, which an analyst reading the case
-   * later has no way to tell
-   */
+  // Hitting the cap means the case holds only part of the incident
   if (alerts.length >= config.grouping.maxAlertsPerCase) {
     log.warn('group hit the alert cap - the case may not contain the whole incident', {
       spaceId,
@@ -269,10 +259,10 @@ async function addAlertToCase(apiKey, caseId, alertId) {
     existingCase = await client.getCase(alert.spaceId, caseId);
   } catch (err) {
     const e = describeAxiosError(err, 'Looking up case');
-    if (/not found/i.test(e.message)) {
+    if (e.status === 404) {
       throw new UserFacingError(
         `Could not find case \`${caseId}\` in space \`${alert.spaceId}\`. ` +
-          'Double-check the case ID from Elastibot\'s creation message.'
+          "Double-check the case ID from Elastibot's creation message."
       );
     }
     throw e;
@@ -296,8 +286,7 @@ async function addAlertToCase(apiKey, caseId, alertId) {
     try {
       await client.setAlertsWorkflowStatus(alert.spaceId, [alert.id], desired);
     } catch (err) {
-      // Deliberately non-fatal: the alert IS on the case, it just didn't inherit
-      // the status. Worth a warning, not worth failing the analyst's command
+      // Non-fatal: the alert is on the case, it just didn't inherit the status
       log.warn('alert status sync failed - alert is attached but status not inherited', {
         err,
         caseId,

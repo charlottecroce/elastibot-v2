@@ -2,6 +2,7 @@
 
 const { addAlertToCase } = require('../services/caseService');
 const { alertAddedBlocks } = require('../services/format');
+const { COMMANDS } = require('../constants');
 
 /*
  * /add_alert (caseID) (alertID)
@@ -10,9 +11,9 @@ const { alertAddedBlocks } = require('../services/format');
 
 module.exports = function registerAddAlert(reg) {
   reg.command(
-    '/add_alert',
-    async ({ args, user, reply, slackUserId, log }) => {
-      const [caseId, alertId] = args;
+    COMMANDS.ADD_ALERT,
+    async ({ argv, user, reply, slackUserId, log }) => {
+      const [caseId, alertId] = argv;
       const result = await addAlertToCase(user.apiKey, caseId, alertId);
 
       log.info('alert attached', { caseId: result.caseId, alertId: result.alertId });

@@ -13,16 +13,32 @@ const { startWatchers } = require('./src/watchers');
 /*
  * Bootstrap only.
  *
- *   config validation > context > slack app > commands > watchers > shutdown
+ *   process handlers > config validation > context > slack app > commands > watchers > shutdown
  */
 
 const log = logger.child({ scope: 'app' });
 
 async function main() {
+  // Registered first so it covers everything below. Hooks are collected as the
+  // pieces they clean up come into existence
+  const fatalHooks = [];
+  registerProcessHandlers({
+    onFatal: async () => {
+      for (const hook of fatalHooks) {
+        try {
+          await hook();
+        } catch {
+          /* best effort during a fatal exit */
+        }
+      }
+    },
+  });
+
   // Throws ConfigError listing everything that's wrong, not just the first
   validateConfig(config);
 
   const ctx = createContext();
+  fatalHooks.push(() => ctx.close());
 
   const app = new App({
     token: config.slack.botToken,
@@ -38,19 +54,11 @@ async function main() {
 
   registerBoltErrorHandler(app);
 
-  await app.start(config.slack.socketMode ? undefined : config.slack.port);
-  log.info('elastibot started', {
-    mode: config.slack.socketMode ? 'socket' : 'http',
-    port: config.slack.socketMode ? undefined : config.slack.port,
-    logLevel: logger.settings.level,
-  });
-
-  const watchers = startWatchers(app, ctx);
-
-  /*
-   * Shutdown
-   */
+  // Declared before app.start() so a SIGTERM during startup still takes the
+  // graceful path
+  let watchers = { stop: async () => {} };
   let shuttingDown = false;
+
   const shutdown = async (signal) => {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -78,14 +86,16 @@ async function main() {
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-  // onFatal still flushes the cursor file, so a crash
-  // doesn't cost us the alerts we already posted
-  registerProcessHandlers({
-    onFatal: async () => {
-      await watchers.stop();
-      await ctx.close();
-    },
+  await app.start(config.slack.socketMode ? undefined : config.slack.port);
+  log.info('elastibot started', {
+    mode: config.slack.socketMode ? 'socket' : 'http',
+    port: config.slack.socketMode ? undefined : config.slack.port,
+    logLevel: logger.settings.level,
   });
+
+  watchers = startWatchers(app, ctx);
+  // Stop polling before flushing the stores, so the cursor written is final
+  fatalHooks.unshift(() => watchers.stop());
 }
 
 main().catch((err) => {

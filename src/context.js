@@ -7,7 +7,6 @@ const { logger } = require('./util/logger');
 
 /*
  * The application context: everything with a lifetime longer than one request.
- *
  */
 
 /**
@@ -48,6 +47,8 @@ function createContext(overrides = {}) {
       } catch (err) {
         log.error('error flushing stores during shutdown', { err });
       }
+      // Drop decrypted API keys from memory
+      users.clearCache?.();
       spaces.clear?.();
       log.debug('context closed');
     },

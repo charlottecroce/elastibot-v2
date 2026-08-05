@@ -74,9 +74,18 @@ module.exports = function createRegistrar(app, ctx) {
       const log = rootLogger.child({ scope, traceId, slackUserId });
       const reply = makeReply(kind, args);
 
+      // Views ack themselves, so wrap ack to track whether they got there. An
+      // unacked view leaves the modal spinning until Slack times it out
+      let acked = false;
+      const originalAck = args.ack;
+      const trackedAck = async (...ackArgs) => {
+        acked = true;
+        return originalAck(...ackArgs);
+      };
+
       if (autoAck) {
         try {
-          await args.ack();
+          await trackedAck();
         } catch (ackErr) {
           // A failed ack means Slack already timed out; nothing to reply to
           log.error('ack failed', { err: ackErr });
@@ -107,10 +116,29 @@ module.exports = function createRegistrar(app, ctx) {
           }
         }
 
-        await handler({ ...args, ctx, log, reply, traceId, slackUserId, user, text, args: argv });
+        await handler({
+          ...args,
+          ack: trackedAck,
+          ctx,
+          log,
+          reply,
+          traceId,
+          slackUserId,
+          user,
+          text,
+          argv,
+        });
         log.debug('handled', { ms: Date.now() - started });
       } catch (err) {
         await handleHandlerError(err, { log, reply, traceId, userErrorSuffix });
+      } finally {
+        if (!acked) {
+          try {
+            await originalAck();
+          } catch (ackErr) {
+            log.error('fallback ack failed', { err: ackErr });
+          }
+        }
       }
     }
 

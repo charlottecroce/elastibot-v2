@@ -5,6 +5,7 @@ const axios = require('axios');
 const config = require('../config');
 const { installRetry } = require('./util/retry');
 const { TtlCache } = require('./util/cache');
+const { DEFAULT_SPACE, UNKNOWN_RULE } = require('./constants');
 
 /*
  * Thin client over Elasticsearch (alert lookups) and Kibana (Cases/Spaces APIs)
@@ -14,8 +15,20 @@ const { TtlCache } = require('./util/cache');
  *   - getServiceClient()           > shared, uses the service key for watchers
  */
 
+/*
+ * The field the alert watcher pages on. getAlertsSince filters (`gt`) and sorts
+ * on it, and toAlert exposes it as `cursorTimestamp`. Changing this means
+ * changing getAlertsSince and watchers/alerts.js together
+ */
+const CURSOR_FIELD = '@timestamp';
+
 const agent = new https.Agent({
   rejectUnauthorized: config.elastic.tlsRejectUnauthorized,
+  keepAlive: true,
+  keepAliveMsecs: 30000,
+  maxSockets: config.elastic.maxSockets,
+  maxFreeSockets: 10,
+  timeout: config.elastic.requestTimeoutMs,
 });
 
 /** Read an alert field that may be stored either dotted ("a.b.c") or nested */
@@ -39,6 +52,9 @@ function ownerFromConsumer(consumer, fallback = config.elastic.defaultOwner) {
 
 /**
  * Map an ES hit to the trimmed alert shape the rest of the app works with.
+ *
+ * `timestamp` is for display and grouping; `cursorTimestamp` is for paging.
+ * They come from different fields and are not interchangeable
  */
 function toAlert(hit, { includeSource = false } = {}) {
   const src = hit._source || {};
@@ -46,11 +62,12 @@ function toAlert(hit, { includeSource = false } = {}) {
   const alert = {
     id: hit._id,
     index: hit._index,
-    spaceId: (Array.isArray(spaceIds) ? spaceIds[0] : spaceIds) || 'default',
-    ruleName: field(src, 'kibana.alert.rule.name') || 'Unknown Rule',
+    spaceId: (Array.isArray(spaceIds) ? spaceIds[0] : spaceIds) || DEFAULT_SPACE,
+    ruleName: field(src, 'kibana.alert.rule.name') || UNKNOWN_RULE,
     ruleId: field(src, 'kibana.alert.rule.uuid'),
     severity: field(src, 'kibana.alert.severity') || 'unknown',
-    timestamp: field(src, 'kibana.alert.@timestamp') || field(src, '@timestamp'),
+    timestamp: field(src, 'kibana.alert.@timestamp') || field(src, CURSOR_FIELD),
+    cursorTimestamp: field(src, CURSOR_FIELD),
     owner: ownerFromConsumer(field(src, 'kibana.alert.rule.consumer')),
     userName: field(src, 'user.name'),
     hostName: field(src, 'host.name'),
@@ -66,17 +83,22 @@ function toAlert(hit, { includeSource = false } = {}) {
 function buildElasticClient(apiKey) {
   if (!apiKey) throw new Error('An Elastic API key is required to build a client.');
 
-  const es = axios.create({
-    baseURL: config.elastic.esUrl,
+  const transport = {
     timeout: config.elastic.requestTimeoutMs,
     httpsAgent: agent,
+    maxContentLength: config.elastic.maxResponseBytes,
+    maxBodyLength: config.elastic.maxResponseBytes,
+  };
+
+  const es = axios.create({
+    ...transport,
+    baseURL: config.elastic.esUrl,
     headers: { Authorization: `ApiKey ${apiKey}`, 'Content-Type': 'application/json' },
   });
 
   const kib = axios.create({
+    ...transport,
     baseURL: config.elastic.kibanaUrl,
-    timeout: config.elastic.requestTimeoutMs,
-    httpsAgent: agent,
     headers: {
       Authorization: `ApiKey ${apiKey}`,
       'Content-Type': 'application/json',
@@ -84,11 +106,7 @@ function buildElasticClient(apiKey) {
     },
   });
 
-  /*
-   * Retry transient failures. The interceptor only ever retries reads - see
-   * util/retry.js. A 503 during a cluster rebalance used to fail the analyst's
-   * whole command, and they retried it by hand
-   */
+  // Retries reads only - see util/retry.js
   const retryOpts = {
     retries: config.elastic.retries,
     baseDelayMs: config.elastic.retryBaseDelayMs,
@@ -98,7 +116,7 @@ function buildElasticClient(apiKey) {
 
   // Space paths: the default space is un-prefixed; others use /s/<id>
   const spacePath = (spaceId) =>
-    spaceId && spaceId !== 'default' ? `/s/${encodeURIComponent(spaceId)}` : '';
+    spaceId && spaceId !== DEFAULT_SPACE ? `/s/${encodeURIComponent(spaceId)}` : '';
 
   const alertsPath = `/${encodeURIComponent(config.elastic.alertsIndex)}/_search`;
 
@@ -116,14 +134,14 @@ function buildElasticClient(apiKey) {
       return toAlert(hit, { includeSource: true });
     },
 
-    /** Alerts with @timestamp strictly after `sinceIso` */
+    /** Alerts with CURSOR_FIELD strictly after `sinceIso`, oldest first */
     async getAlertsSince(sinceIso, size = 25) {
       const range = sinceIso
-        ? { range: { '@timestamp': { gt: sinceIso } } }
+        ? { range: { [CURSOR_FIELD]: { gt: sinceIso } } }
         : { match_all: {} };
       const { data } = await es.post(alertsPath, {
         size,
-        sort: [{ '@timestamp': 'asc' }],
+        sort: [{ [CURSOR_FIELD]: 'asc' }],
         query: range,
       });
       return (data?.hits?.hits || []).map((hit) => toAlert(hit));
@@ -201,9 +219,8 @@ function buildElasticClient(apiKey) {
           user_count: { cardinality: { field: 'user.name' } },
           risk: { stats: { field: 'kibana.alert.risk_score' } },
           in_cases: { filter: { exists: { field: 'kibana.alert.case_ids' } } },
-          // Hourly buckets in the operator's timezone. Hour-of-day and day-of-week
-          // are folded out of these client-side, which keeps the query free of
-          // runtime scripts
+          // Hour-of-day and day-of-week are folded out of these buckets
+          // client-side, which keeps the query free of runtime scripts
           over_time: {
             date_histogram: {
               field: '@timestamp',
@@ -228,7 +245,7 @@ function buildElasticClient(apiKey) {
       }
     },
 
-    /** Create a case in the given space and eturns the raw case object */
+    /** Create a case in the given space. Returns the raw case object */
     async createCase(spaceId, body) {
       const { data } = await kib.post(`${spacePath(spaceId)}/api/cases`, body);
       return data;
@@ -278,8 +295,8 @@ function buildElasticClient(apiKey) {
 }
 
 /*
- * Clients are cached per API key rather than rebuilt on every command. The TTL
- * bounds how long a revoked key keeps a working client; the cap bounds memory.
+ * Clients are cached per API key. The TTL bounds how long a revoked key keeps a
+ * working client; the cap bounds memory.
  *
  * The cache key is a secret. It stays in memory and is never logged - TtlCache
  * exposes `size`, never its keys
@@ -299,9 +316,7 @@ function invalidateClient(apiKey) {
   return clientCache.delete(apiKey);
 }
 
-/*
- * Lazy service client for non-user operations (watchers, space lookups).
- */
+// Lazy service client for non-user operations (watchers, space lookups)
 let _serviceClient;
 
 function getServiceClient() {
@@ -326,4 +341,5 @@ module.exports = {
   ownerFromConsumer,
   toAlert,
   field,
+  CURSOR_FIELD,
 };

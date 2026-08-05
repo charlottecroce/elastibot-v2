@@ -10,11 +10,9 @@ const { logger } = require('../util/logger');
 /*
  * Watcher wiring.
  *
- * Decide whether the watchers should run, assemble
- * their dependencies, and hand a tick to the runner.
- * 
- * The polling logic lives in
- * alerts.js and cases.js, the loop lives in runner.js
+ * Decide whether the watchers should run, assemble their dependencies, and hand
+ * a tick to the runner. The polling logic lives in alerts.js and cases.js, the
+ * loop lives in runner.js
  *
  * Routing: config.watchers.channelRouting[spaceId] || config.watchers.defaultChannel
  */
@@ -25,20 +23,20 @@ function channelFor(spaceId) {
   return config.watchers.channelRouting[spaceId] || config.watchers.defaultChannel || '';
 }
 
-/** A stop() that resolves immediately, for the cases where we never start */
-const noopStop = () => ({ stop: async () => {}, isRunning: () => false });
+/** A runner-shaped no-op, for the cases where we never start */
+const noopRunner = () => ({ stop: async () => {}, isRunning: () => false });
 
 /**
  * Start the polling loop.
  *
  * @param {object} app  Bolt app
  * @param {object} ctx  application context ({ state, spaces })
- * @returns {{stop: function(): Promise<void>}}
+ * @returns {{stop: function(): Promise<void>, isRunning: function(): boolean}}
  */
 function startWatchers(app, ctx) {
   if (!config.watchers.enabled) {
     log.info('watchers disabled via config');
-    return noopStop();
+    return noopRunner();
   }
 
   const elastic = getServiceClient();
@@ -46,7 +44,7 @@ function startWatchers(app, ctx) {
     log.warn('ELASTIC_SERVICE_API_KEY not set - watchers cannot run', {
       remedy: 'set ELASTIC_SERVICE_API_KEY in .env, or WATCHERS_ENABLED=false to silence this',
     });
-    return noopStop();
+    return noopRunner();
   }
 
   if (!config.watchers.defaultChannel && Object.keys(config.watchers.channelRouting).length === 0) {
@@ -80,6 +78,7 @@ function startWatchers(app, ctx) {
     alerts: config.watchers.alerts.enabled,
     cases: config.watchers.cases.enabled,
     caseSpaces: config.watchers.cases.spaces,
+    casePerPage: config.watchers.cases.perPage,
   });
 
   return runner;

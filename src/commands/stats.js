@@ -2,6 +2,7 @@
 
 const { getAlertStatistics } = require('../services/statsService');
 const { statsBlocks, STATS_USAGE } = require('../services/format');
+const { COMMANDS } = require('../constants');
 
 /*
  * /stats [window] [filters] [share]
@@ -12,7 +13,7 @@ const { statsBlocks, STATS_USAGE } = require('../services/format');
 
 module.exports = function registerStats(reg) {
   reg.command(
-    '/stats',
+    COMMANDS.STATS,
     async ({ text, user, reply, log }) => {
       if (/^(help|-h|--help|\?)$/i.test(text)) {
         await reply.ephemeral(STATS_USAGE);

@@ -1,8 +1,10 @@
 'use strict';
 
 const fs = require('fs');
+const config = require('../config');
 const { encrypt, decrypt } = require('./util/crypto');
 const { writeJsonAtomicSync } = require('./util/atomicFile');
+const { TtlCache, MISS } = require('./util/cache');
 const { logger } = require('./util/logger');
 
 const log = logger.child({ scope: 'store' });
@@ -42,7 +44,7 @@ function readJson(filePath, fallback) {
  * and an explicit flush for shutdown
  *
  * debounceMs defaults to 0 (write-through), which keeps `set()` synchronous from
- * the caller's point of view - existing callers and tests see no change
+ * the caller's point of view
  */
 class JsonFileStore {
   constructor({ filePath, debounceMs = 0 }) {
@@ -54,8 +56,9 @@ class JsonFileStore {
   }
 
   _persist() {
+    this._dirty = true;
+
     if (this.debounceMs > 0) {
-      this._dirty = true;
       if (this._timer) return;
       this._timer = setTimeout(() => {
         this._timer = null;
@@ -68,6 +71,7 @@ class JsonFileStore {
   }
 
   _writeNow() {
+    if (!this._dirty) return;
     try {
       writeJsonAtomicSync(this.filePath, this.data, { mode: 0o600 });
       this._dirty = false;
@@ -83,7 +87,7 @@ class JsonFileStore {
       clearTimeout(this._timer);
       this._timer = null;
     }
-    if (this._dirty || this.debounceMs === 0) this._writeNow();
+    this._writeNow();
   }
 }
 
@@ -95,21 +99,31 @@ class JsonFileStore {
  * to succeed must survive an immediate crash
  */
 class UserStore extends JsonFileStore {
-  constructor({ filePath, encryptionKey }) {
+  constructor({ filePath, encryptionKey, cacheTtlMs = config.cache.userTtlMs }) {
     super({ filePath, debounceMs: 0 });
     this.encryptionKey = encryptionKey;
+
+    // Decrypted records are cached because scrypt derivation is ~50-100ms and
+    // get() runs on every command with requireUser. Invalidated on set/delete
+    this._cache = new TtlCache({ ttlMs: cacheTtlMs > 0 ? cacheTtlMs : 1, max: 500 });
+
     log.debug('user store loaded', { filePath, users: Object.keys(this.data).length });
   }
 
   /** Returns { kibanaUsername, apiKey } with apiKey decrypted, or null */
   get(slackUserId) {
+    const cached = this._cache.get(slackUserId);
+    if (cached !== MISS) return cached;
+
     const rec = this.data[slackUserId];
-    if (!rec) return null;
-    return {
+    if (!rec) return this._cache.set(slackUserId, null);
+
+    const decrypted = {
       kibanaUsername: rec.kibanaUsername,
       apiKey: decrypt(rec.apiKey, this.encryptionKey),
       updatedAt: rec.updatedAt,
     };
+    return this._cache.set(slackUserId, decrypted);
   }
 
   has(slackUserId) {
@@ -122,12 +136,19 @@ class UserStore extends JsonFileStore {
       apiKey: encrypt(apiKey, this.encryptionKey),
       updatedAt: new Date().toISOString(),
     };
+    this._cache.delete(slackUserId);
     this._persist();
   }
 
   delete(slackUserId) {
     delete this.data[slackUserId];
+    this._cache.delete(slackUserId);
     this._persist();
+  }
+
+  /** Drop every decrypted record from memory. Called on shutdown */
+  clearCache() {
+    this._cache.clear();
   }
 }
 
@@ -139,8 +160,14 @@ class StateStore extends JsonFileStore {
     super({ filePath, debounceMs });
   }
 
+  /**
+   * Object values are returned as copies, so callers must go through set() to
+   * persist and an accidental mutation can't desync memory from disk
+   */
   get(key, fallback) {
-    return key in this.data ? this.data[key] : fallback;
+    if (!(key in this.data)) return fallback;
+    const value = this.data[key];
+    return value && typeof value === 'object' ? structuredClone(value) : value;
   }
 
   set(key, value) {
