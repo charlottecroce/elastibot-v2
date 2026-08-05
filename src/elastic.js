@@ -212,7 +212,7 @@ function buildElasticClient(apiKey) {
               users: { cardinality: { field: 'user.name' } },
               risk: { avg: { field: 'kibana.alert.risk_score' } },
               last_seen: { max: { field: CURSOR_FIELD } },
-              // Alerts attached to a case carry kibana.alert.case_ids - our in-index signal that an analyst thought the alert mattered enough to make a case
+              // Alerts attached to a case carry kibana.alert.case_ids
               in_cases: { filter: { exists: { field: 'kibana.alert.case_ids' } } },
             },
           },
@@ -227,8 +227,7 @@ function buildElasticClient(apiKey) {
           user_count: { cardinality: { field: 'user.name' } },
           risk: { stats: { field: 'kibana.alert.risk_score' } },
           in_cases: { filter: { exists: { field: 'kibana.alert.case_ids' } } },
-          // Hour-of-day and day-of-week are folded out of these buckets
-          // client-side, which keeps the query free of runtime scripts
+          // Hour-of-day and day-of-week are folded out of these buckets client-side, which keeps the query free of runtime scripts
           over_time: {
             date_histogram: {
               field: CURSOR_FIELD,
