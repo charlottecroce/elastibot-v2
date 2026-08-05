@@ -37,6 +37,21 @@ function axiosError(status, body) {
   });
 }
 
+/**
+ * TLS-shaped rejection: no `response` at all (the handshake never got that far),
+ * just a `code` and/or `message` from Node's TLS layer, plus the request config
+ */
+function tlsError(code, message) {
+  return Object.assign(new Error(message), {
+    ...(code ? { code } : {}),
+    config: {
+      method: 'post',
+      baseURL: 'https://es.internal:9200',
+      url: '/.alerts-security.alerts-*/_search',
+    },
+  });
+}
+
 describe('logger levels', () => {
   test('records below the configured level are dropped', () => {
     const { log, records } = capturing('warn');
@@ -161,8 +176,56 @@ describe('error taxonomy', () => {
     expect(describeAxiosError(refused, 'Looking up alert').message).toMatch(/KIBANA_URL/);
   });
 
+  test('a self-signed certificate failure gets actionable TLS advice, not a raw OpenSSL message', () => {
+    const err = describeAxiosError(
+      tlsError('SELF_SIGNED_CERT_IN_CHAIN', 'self-signed certificate in certificate chain'),
+      'Looking up case'
+    );
+    expect(isUserFacing(err)).toBe(true);
+    expect(err.message).toMatch(/TLS certificate problem/);
+    expect(err.message).toMatch(/ELASTIC_TLS_REJECT_UNAUTHORIZED/);
+    expect(err.message).toContain('SELF_SIGNED_CERT_IN_CHAIN');
+  });
+
+  test('an unverifiable chain is recognised even when Node gives no stable code', () => {
+    // e.g. "unable to verify the first certificate" - some OpenSSL paths only set message
+    const err = describeAxiosError(
+      tlsError(undefined, 'unable to verify the first certificate'),
+      'Looking up alert'
+    );
+    expect(err.message).toMatch(/TLS certificate problem/);
+    expect(err.message).toMatch(/ELASTIC_TLS_REJECT_UNAUTHORIZED/);
+  });
+
+  test('other TLS failure modes (expired, untrusted issuer) are also caught by code', () => {
+    expect(
+      describeAxiosError(tlsError('CERT_HAS_EXPIRED', 'certificate has expired'), 'x').message
+    ).toMatch(/TLS certificate problem/);
+    expect(
+      describeAxiosError(
+        tlsError('UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'unable to get local issuer certificate'),
+        'x'
+      ).message
+    ).toMatch(/TLS certificate problem/);
+  });
+
+  test('a plain connection error is not misclassified as a TLS problem', () => {
+    const refused = Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:9200'), {
+      code: 'ECONNREFUSED',
+    });
+    expect(describeAxiosError(refused, 'x').message).not.toMatch(/TLS certificate problem/);
+  });
+
+  test('404 is not misclassified as a TLS problem', () => {
+    const err = describeAxiosError(axiosError(404, { message: 'missing' }), 'x');
+    expect(err.message).not.toMatch(/TLS certificate problem/);
+  });
+
   test('everything from describeAxiosError is safe to show', () => {
     expect(isUserFacing(describeAxiosError(axiosError(500, {}), 'x'))).toBe(true);
+    expect(
+      isUserFacing(describeAxiosError(tlsError('SELF_SIGNED_CERT_IN_CHAIN', 'x'), 'x'))
+    ).toBe(true);
   });
 
   test('an unexpected error becomes an opaque reference, not a raw message', () => {

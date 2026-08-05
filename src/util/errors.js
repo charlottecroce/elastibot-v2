@@ -35,6 +35,34 @@ function isUserFacing(err) {
   return Boolean(err && (err instanceof UserFacingError || err.expose === true));
 }
 
+/*
+ * TLS/certificate failures. Internal Elastic/Kibana deployments very often run
+ * on a self-signed or internally-issued cert, and ELASTIC_TLS_REJECT_UNAUTHORIZED
+ * defaults to true (TLS verification should be opt-out, not opt-in).
+ * The first time someone points this bot at such a cluster, EVERY request fails
+ * this way, on both the ES and Kibana clients, on every watcher tick - so it's
+ * worth its own actionable message rather than falling into the generic bucket.
+ *
+ * Node/OpenSSL usually attach a stable `code`, but not always - some paths only
+ * set `err.message`, so we also match on that as a fallback
+ */
+const TLS_ERROR_CODES = new Set([
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'CERT_HAS_EXPIRED',
+  'CERT_UNTRUSTED',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+]);
+
+function isTlsError(err) {
+  if (err?.code && TLS_ERROR_CODES.has(err.code)) return true;
+  // Fallback for cases where OpenSSL's reason never made it into a `code`
+  return /certificate/i.test(String(err?.message || ''));
+}
+
 /**
  * Turn an axios rejection into a user-friendly message
  *
@@ -78,6 +106,15 @@ function describeAxiosError(err, context) {
       { code: err.code, cause: err }
     );
   }
+  if (isTlsError(err)) {
+    return new UserFacingError(
+      `${context}: TLS certificate problem talking to Elastic` +
+        `${err?.code ? ` (${err.code})` : ''}. If this is an internal cluster with a ` +
+        'self-signed or internally-issued certificate, set `ELASTIC_TLS_REJECT_UNAUTHORIZED=false` ' +
+        'in `.env`, or install the CA certificate so it verifies normally.',
+      { code: err?.code, cause: err }
+    );
+  }
 
   return new UserFacingError(`${context}: ${reason || 'request failed'}`.trim(), {
     status,
@@ -102,4 +139,5 @@ module.exports = {
   isUserFacing,
   describeAxiosError,
   toUserMessage,
+  isTlsError,
 };
