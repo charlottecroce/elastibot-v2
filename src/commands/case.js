@@ -7,13 +7,13 @@ const { ACTIONS, COMMANDS } = require('../constants');
 
 /*
  * /case (alertID)
- *   Creates a case for the alert in the alert's space, titled per the naming
- *   scheme, and attaches the alert. If the alert has a user + host, sibling alerts
- *   within the grouping window are pulled in and filed into the same case.
- *   Reply is posted in-channel so the team sees the new case ID
+ *   Creates a case for THAT ONE ALERT in the alert's own space, titled per the
+ *   naming scheme, and attaches it.
  *
  * Also registers the "Create case" button the alert watcher attaches to its
- * notifications - it files the whole incident (all correlated alerts) into one case
+ * notifications. That path is the one that groups: for a correlated incident it
+ * re-runs the user+host+time-range query and files the whole burst into a single
+ * case
  */
 
 module.exports = function registerCase(reg) {

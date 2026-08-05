@@ -57,7 +57,7 @@ function windowToMs(windowStr) {
 
 /**
  * Parse the raw slash-command text into a query descriptor
- * @returns {{windowLabel,from,to,timeZone,filters,share}}
+ * @returns {{windowLabel,windowMs,from,to,timeZone,filters,share}}
  */
 function parseStatsQuery(text, now = new Date()) {
   const filters = {};
@@ -145,14 +145,11 @@ function foldActivity(overTime, windowMs) {
 }
 
 /**
- * Turn the raw aggregation response into the object statsBlocks renders 
- * the tests feed it a fixture instead of a cluster
+ * Turn the raw aggregation response into the object statsBlocks renders.
+ * The tests feed it a fixture instead of a cluster
  */
-function shapeStats(raw, query, opts = {}) {
-  const {
-    topN = config.stats.topN,
-    noiseMinAlerts = config.stats.noiseMinAlerts,
-  } = opts;
+function shapeStats(raw, query) {
+  const { topN, noiseMinAlerts } = config.stats;
   const aggs = raw?.aggregations || {};
   const total = raw?.hits?.total?.value ?? 0;
 
@@ -172,6 +169,8 @@ function shapeStats(raw, query, opts = {}) {
     };
   });
 
+  // Below the noise floor a rule can't earn a place in the "noisiest" list:
+  // 2 alerts on 1 host is a 2.0 ratio and means nothing
   const loud = rules.filter((r) => r.count >= noiseMinAlerts);
 
   return {
@@ -189,8 +188,9 @@ function shapeStats(raw, query, opts = {}) {
     risk: { avg: aggs.risk?.avg || 0, max: aggs.risk?.max || 0 },
     severities: buckets(aggs.severities),
     workflow: buckets(aggs.workflow),
+    // rules already arrives ordered by doc_count, so topRules is just a slice
     topRules: rules.slice(0, topN),
-    noisyRules: [...loud].sort((a, b) => b.perHost - a.perHost).slice(0, topN),
+    noisyRules: loud.sort((a, b) => b.perHost - a.perHost).slice(0, topN),
     topHosts: buckets(aggs.hosts),
     topUsers: buckets(aggs.users),
     topProcesses: buckets(aggs.processes),
@@ -204,8 +204,10 @@ function shapeStats(raw, query, opts = {}) {
  *
  * @param {string} apiKey  the analyst's Elastic API key
  * @param {string} text    raw slash-command text
+ * @param {Date}   [now]   injectable clock, so the tests get a fixed window
  */
 async function getAlertStatistics(apiKey, text, now = new Date()) {
+  // Parsed BEFORE the client is built, so bad input never reaches Elastic
   const query = parseStatsQuery(text, now);
   const client = createElasticClient(apiKey);
 

@@ -33,7 +33,7 @@ Set `STATS_TIMEZONE` to your SOC's timezone or "busiest hour" doesn't mean anyth
 
 ## Setup
 
-1. **Create the Slack app** from [[manifest.yml]]
+1. **Create the Slack app** from [manifest.yml](manifest.yml)
    (https://api.slack.com/apps > *From an app manifest*), then install it.
 
 2. **Configure secrets**
@@ -66,7 +66,7 @@ npm run test:watch
 npm run test:coverage
 ```
 
-Nothing in the suite touches a real cluster or a real Slack workspace: the Elastic client is mocked and [[tests/setup.js]] pins the config the tests assume, so no `.env` is needed.[[`.github/workflows/tests.yml]] runs the same command on Node 18/20/22 for every push to `main` and every PR.
+Nothing in the suite touches a real cluster or a real Slack workspace: the Elastic client is mocked and [tests/setup.js](tests/setup.js) pins the config the tests assume, so no `.env` is needed.`.github/workflows/tests.yml](.github/workflows/tests.yml) runs the same command on Node 18/20/22 for every push to `main` and every PR.
 
 ## Security notes
 

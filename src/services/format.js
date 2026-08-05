@@ -5,7 +5,7 @@ const { ACTIONS, DEFAULT_SPACE } = require('../constants');
 
 /** Build a Kibana link to a case, respecting space + solution */
 function caseUrl(spaceId, caseId, owner) {
-  const base = (config.elastic.kibanaPublicUrl || config.elastic.kibanaUrl || '').replace(/\/$/, '');
+  const base = (config.elastic.kibanaPublicUrl || '').replace(/\/$/, '');
   const sp = spaceId && spaceId !== DEFAULT_SPACE ? `/s/${encodeURIComponent(spaceId)}` : '';
   const id = encodeURIComponent(caseId);
   if (owner === 'securitySolution') return `${base}${sp}/app/security/cases/${id}`;
@@ -64,7 +64,7 @@ function bar(value, max, width = 10) {
 function sparkline(values) {
   const ticks = '▁▂▃▄▅▆▇█';
   const max = maxOf(values);
-  if (!max) return ticks[0].repeat(values.length);
+  if (!max) return ' '.repeat(values.length); // same glyph a zero gets below
   return values
     .map((v) => (v === 0 ? ' ' : ticks[Math.min(ticks.length - 1, Math.ceil((v / max) * (ticks.length - 1)))]))
     .join('');

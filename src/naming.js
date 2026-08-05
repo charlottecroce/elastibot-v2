@@ -10,10 +10,10 @@ const { UNKNOWN_RULE } = require('./constants');
  *   part3 - rule name
  *   joined by dashes:  PART1-MMDDYY-Rule Name
  *
- * TIMEZONE: pass `timeZone` to pin the date to a specific zone. caseService
- * passes config.naming.timeZone, so case titles are deterministic regardless of
- * which region the process runs in. Omitting it falls back to the node
- * process's local zone, which is only appropriate for a one-off call
+ * TIMEZONE: every date here is rendered in an explicit IANA zone, so the same
+ * alert produces the same case title whatever region the process runs in.
+ * caseService passes config.naming.timeZone, which is always set (it defaults
+ * to 'UTC'), so there is no host-local fallback to fall into by accident
  */
 
 /** First letter of each word */
@@ -40,29 +40,25 @@ function partOne(spaceName) {
   return out.toUpperCase();
 }
 
-/**
- * MMDDYY.
- *
- * @param {Date} [date]
- * @param {string|null} [timeZone] IANA zone, e.g. 'America/New_York'. When null
- *   (the default) the process's local timezone is used, preserving existing
- *   behaviour and existing case titles
- */
-function datePart(date = new Date(), timeZone = null) {
-  if (!timeZone) {
-    const mm = String(date.getMonth() + 1).padStart(2, '0');
-    const dd = String(date.getDate()).padStart(2, '0');
-    const yy = String(date.getFullYear()).slice(-2);
-    return `${mm}${dd}${yy}`;
-  }
+/** Pull named parts out of an Intl format, e.g. get('month') */
+function partsOf(date, options) {
+  const parts = new Intl.DateTimeFormat('en-US', options).formatToParts(date);
+  return (type) => parts.find((p) => p.type === type)?.value || '';
+}
 
-  const parts = new Intl.DateTimeFormat('en-US', {
+/**
+ * MMDDYY in the given zone.
+ *
+ * @param {Date} date
+ * @param {string} timeZone IANA zone, e.g. 'America/New_York' or 'UTC'
+ */
+function datePart(date, timeZone) {
+  const get = partsOf(date, {
     timeZone,
     year: '2-digit',
     month: '2-digit',
     day: '2-digit',
-  }).formatToParts(date);
-  const get = (type) => parts.find((p) => p.type === type)?.value || '';
+  });
   return `${get('month')}${get('day')}${get('year')}`;
 }
 
@@ -71,16 +67,14 @@ const MONTHS = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-/** month and year used as a case tag, e.g. "July 2026" */
-function monthYearTag(date = new Date(), timeZone = null) {
-  if (!timeZone) return `${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
-
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: 'numeric',
-  }).formatToParts(date);
-  const get = (type) => parts.find((p) => p.type === type)?.value || '';
+/**
+ * Month and year used as a case tag, e.g. "July 2026"
+ *
+ * @param {Date} date
+ * @param {string} timeZone
+ */
+function monthYearTag(date, timeZone) {
+  const get = partsOf(date, { timeZone, year: 'numeric', month: 'numeric' });
   return `${MONTHS[Number(get('month')) - 1]} ${get('year')}`;
 }
 
@@ -95,10 +89,12 @@ function partThree(ruleName, truncateRuleWords) {
 /**
  * @param {string} spaceName space name (display name)
  * @param {string} ruleName  detection rule name
- * @param {object} [opts]    { date, truncateRuleWords, timeZone }
+ * @param {object} opts
+ * @param {string} opts.timeZone            required - see the TIMEZONE note above
+ * @param {Date}   [opts.date]
+ * @param {number|null} [opts.truncateRuleWords]
  */
-function buildCaseTitle(spaceName, ruleName, opts = {}) {
-  const { date = new Date(), truncateRuleWords = null, timeZone = null } = opts;
+function buildCaseTitle(spaceName, ruleName, { timeZone, date = new Date(), truncateRuleWords = null } = {}) {
   return `${partOne(spaceName)}-${datePart(date, timeZone)}-${partThree(ruleName, truncateRuleWords)}`;
 }
 

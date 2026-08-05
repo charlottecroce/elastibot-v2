@@ -1,6 +1,7 @@
 'use strict';
 
 const config = require('../../config');
+const { invalidateClient } = require('../elastic');
 const { VIEWS, COMMANDS } = require('../constants');
 
 /*
@@ -62,11 +63,16 @@ function startModalView(kibanaUsername) {
         },
       },
       {
+        // This is the moment the analyst decides whether to trust us with the
+        // key, so the claim has to match how the bot is actually configured
         type: 'context',
         elements: [
           {
             type: 'mrkdwn',
-            text: ':lock: Your key is stored encrypted at rest and never posted in a channel.',
+            text: config.security.encryptionKey
+              ? ':lock: Your key is stored encrypted at rest and never posted in a channel.'
+              : ':warning: `ELASTIBOT_SECRET_KEY` is not set on this bot, so your key will ' +
+                'be stored *unencrypted* on the bot host. It is never posted in a channel.',
           },
         ],
       },
@@ -110,12 +116,19 @@ module.exports = function registerStart(reg) {
       log.warn('malformed modal metadata - saving without a username', { err });
     }
 
+    const previous = ctx.users.get(slackUserId);
     ctx.users.set(slackUserId, { kibanaUsername, apiKey });
+
+    // Drop the Elastic client built from the key being replaced. Without this a
+    // rotated (or revoked) key keeps a working client until ELASTIC_CLIENT_TTL_MS
+    if (previous?.apiKey && previous.apiKey !== apiKey) invalidateClient(previous.apiKey);
+
     await ack();
 
     // Deliberately does NOT log the key or any part of it
     log.info('analyst registered', {
       kibanaUsername,
+      reregistered: Boolean(previous),
       encryptedAtRest: Boolean(config.security.encryptionKey),
     });
 

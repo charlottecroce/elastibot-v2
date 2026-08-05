@@ -14,6 +14,8 @@ const { logger } = require('../util/logger');
  *
  * `cursors` is a copy of the stored object, so mutating it here is local until
  * it goes back through state.set
+ *
+ * Return shape matches pollAlerts: { posted, skipped, failed }
  */
 
 const log = logger.child({ scope: 'watcher:cases' });
@@ -21,10 +23,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * @param {object} deps  same shape as pollAlerts
- * @returns {Promise<{posted:number,failed:number}>}
+ * @returns {Promise<{posted:number,skipped:number,failed:number}>}
  */
 async function pollCases({ slack, state, elastic, spaces, channelFor }) {
-  const result = { posted: 0, failed: 0 };
+  const result = { posted: 0, skipped: 0, failed: 0 };
   const perPage = config.watchers.cases.perPage;
   const cursors = state.get(STATE_KEYS.CASES_LAST_TS, {});
   let cursorsChanged = false;
@@ -33,6 +35,9 @@ async function pollCases({ slack, state, elastic, spaces, channelFor }) {
     const spaceLog = log.child({ spaceId });
     const channel = channelFor(spaceId);
     if (!channel) {
+      // no route configured > skip, but count it: a permanently unrouted space
+      // is a config mistake worth seeing in the tick summary
+      result.skipped += 1;
       spaceLog.debug('no channel routed for space - skipping');
       continue;
     }
@@ -97,6 +102,13 @@ async function pollCases({ slack, state, elastic, spaces, channelFor }) {
 
     cursors[spaceId] = fresh[fresh.length - 1].created_at;
     cursorsChanged = true;
+  }
+
+  if (result.failed > 0) {
+    log.error('some cases were not posted and will not be retried', {
+      failed: result.failed,
+      posted: result.posted,
+    });
   }
 
   // Only write when something actually moved

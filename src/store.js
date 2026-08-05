@@ -104,7 +104,11 @@ class UserStore extends JsonFileStore {
     this.encryptionKey = encryptionKey;
 
     // Decrypted records are cached because scrypt derivation is ~50-100ms and
-    // get() runs on every command with requireUser. Invalidated on set/delete
+    // get() runs on every command with requireUser. Invalidated on set/delete.
+    //
+    // The 1ms floor is deliberate, not a typo: TtlCache reads ttlMs === 0 as
+    // "never expire", but USER_CACHE_TTL_MS=0 from an operator means the
+    // opposite - "don't cache". 1ms is the closest expressible equivalent
     this._cache = new TtlCache({ ttlMs: cacheTtlMs > 0 ? cacheTtlMs : 1, max: 500 });
 
     log.debug('user store loaded', { filePath, users: Object.keys(this.data).length });

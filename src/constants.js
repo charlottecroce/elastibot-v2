@@ -1,8 +1,9 @@
 'use strict';
 
 /*
- * Identifiers shared across module boundaries.
- *
+ * Identifiers shared across module boundaries. Anything that has to match
+ * between a producer and a consumer (a button and its handler, a manifest entry
+ * and a command registration, a state file key and its reader) lives here
  */
 
 /** Slack action_ids (buttons, selects) */
@@ -15,7 +16,7 @@ const VIEWS = Object.freeze({
   START_SUBMIT: 'elastibot_start_submit',
 });
 
-/** Slash commands */
+/** Slash commands - must match manifest.yml */
 const COMMANDS = Object.freeze({
   START: '/start',
   CASE: '/case',
@@ -38,9 +39,7 @@ const ALERT_STATUS_FOR_CASE = Object.freeze({
 
 const DEFAULT_SPACE = 'default';
 
-/*
- * The label used when an alert has no rule name.
- */
+/** The label used when an alert has no rule name */
 const UNKNOWN_RULE = 'Unknown Rule';
 
 /*

@@ -6,15 +6,23 @@ const { DEFAULT_SPACE } = require('../constants');
 
 /*
  * Kibana space id > display name, cached.
-
- * One cache, shared by both, with a TTL so renames are picked up. Keyed on the
- * space id only: the display name is a property of the space, not of whose API
- * key asked for it, so a watcher lookup warms the cache for analysts and vice versa
+ *
+ * Two callers need this: the watchers (via the application context) and
+ * caseService (via the shared instance below). One cache serves both, with a
+ * TTL so renames are picked up. Keyed on the space id only: the display name is
+ * a property of the space, not of whose API key asked for it, so a watcher
+ * lookup warms the cache for analysts and vice versa
+ * 
  */
 
 const log = logger.child({ scope: 'service:space' });
 
-function createSpaceService({ ttlMs = 3600000, max = 200 } = {}) {
+/**
+ * @param {object} opts
+ * @param {number} opts.ttlMs  required - the deployment default is config.cache.spaceNameTtlMs
+ * @param {number} [opts.max]
+ */
+function createSpaceService({ ttlMs, max = 200 }) {
   const cache = new TtlCache({ ttlMs, max });
 
   return {
@@ -26,18 +34,19 @@ function createSpaceService({ ttlMs = 3600000, max = 200 } = {}) {
     async getName(spaceId, client) {
       const id = spaceId || DEFAULT_SPACE;
 
-      return cache.getOrLoad(id, async () => {
-        try {
+      try {
+        return await cache.getOrLoad(id, async () => {
           const name = await client.getSpaceName(id);
           log.debug('space name resolved', { spaceId: id, name });
           return name || id;
-        } catch (err) {
-          // Never fail a case creation over a cosmetic lookup. Falling back to
-          // the id is what the old client-level catch did; we just log it now
-          log.warn('space name lookup failed - falling back to the id', { err, spaceId: id });
-          return id;
-        }
-      });
+        });
+      } catch (err) {
+        // Never fail a case creation over a cosmetic lookup. Deliberately
+        // OUTSIDE getOrLoad: a rejected load isn't cached, so one bad minute
+        // doesn't pin the bare id in the cache for the whole TTL
+        log.warn('space name lookup failed - falling back to the id', { err, spaceId: id });
+        return id;
+      }
     },
 
     /** Force a refresh, e.g. after an operator renames a space */
@@ -64,7 +73,7 @@ function createSpaceService({ ttlMs = 3600000, max = 200 } = {}) {
  * do that refactor now, both paths resolve to this same instance, so a watcher
  * lookup warms the cache for the next /case and vice versa. It is an in-memory
  * cache with no I/O of its own, so a module-level instance costs nothing at
- * import time - unlike the Elastic service client, which built an HTTP client
+ * import time - unlike the Elastic service client, which builds an HTTP client
  */
 let shared = null;
 

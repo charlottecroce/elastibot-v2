@@ -100,13 +100,14 @@ class TtlCache {
     const pending = this.inflight.get(key);
     if (pending) return pending;
 
-    const promise = (async () => {
-      try {
-        return this.set(key, await loader(key));
-      } finally {
-        this.inflight.delete(key);
-      }
-    })();
+    // The loader runs on a later tick, so the inflight entry below is always
+    // registered before the cleanup can run. Invoking it inline would let a
+    // synchronously-throwing loader delete the entry first, stranding the
+    // rejected promise in the map for good
+    const promise = Promise.resolve()
+      .then(() => loader(key))
+      .then((value) => this.set(key, value))
+      .finally(() => this.inflight.delete(key));
 
     this.inflight.set(key, promise);
     return promise;

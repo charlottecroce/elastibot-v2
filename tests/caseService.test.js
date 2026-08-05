@@ -7,8 +7,9 @@ const {
   createCaseForAlert,
   createCaseForGroup,
   addAlertToCase,
-  UserFacingError,
 } = require('../src/services/caseService');
+
+const { UserFacingError } = require('../src/util/errors');
 
 /*
  * The Elastic client is faked - these tests are about what Elastibot

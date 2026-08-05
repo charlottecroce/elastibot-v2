@@ -9,12 +9,11 @@
 
 /** Base class so `instanceof AppError` catches everything we raise deliberately */
 class AppError extends Error {
-  constructor(message, { code, cause, status, context, expose = false } = {}) {
+  constructor(message, { code, cause, status, expose = false } = {}) {
     super(message);
     this.name = this.constructor.name;
     this.code = code;
     this.status = status;
-    this.context = context;
     this.expose = expose;
     if (cause) this.cause = cause;
     Error.captureStackTrace?.(this, this.constructor);
@@ -30,9 +29,6 @@ class UserFacingError extends AppError {
 
 /** Missing/invalid configuration found at boot. Fatal by definition */
 class ConfigError extends AppError {}
-
-/** Elastic or Slack failed on us. Carries the upstream status when we have one */
-class ExternalServiceError extends AppError {}
 
 /** True when the message is safe to echo straight back to the analyst */
 function isUserFacing(err) {
@@ -103,7 +99,6 @@ module.exports = {
   AppError,
   UserFacingError,
   ConfigError,
-  ExternalServiceError,
   isUserFacing,
   describeAxiosError,
   toUserMessage,

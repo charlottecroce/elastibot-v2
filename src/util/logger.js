@@ -235,7 +235,7 @@ class Logger {
     return new Logger({ ...this.bindings, ...bindings }, this._settings, this._sink);
   }
 
-  /** Override the level at runtime (used by tests and the /loglevel escape hatch) */
+  /** Override the level at runtime. Used by tests; there is no runtime command for it */
   setLevel(level) {
     if (!(level in LEVELS)) throw new Error(`Unknown log level: ${level}`);
     this.settings.level = level;

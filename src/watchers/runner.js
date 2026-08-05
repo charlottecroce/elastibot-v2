@@ -4,7 +4,6 @@ const { logger } = require('../util/logger');
 
 /*
  * The polling loop, separated from what gets polled.
- *
  */
 
 const log = logger.child({ scope: 'watcher:runner' });

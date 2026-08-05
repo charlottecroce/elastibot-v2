@@ -2,6 +2,7 @@
   "name": "elastibot",
   "version": "1.0.0",
   "description": "Slack bot that helps analysts create Elastic (Kibana) cases from alerts and sends new alerts/cases into Slack channels.",
+  "private": true,
   "main": "app.js",
   "scripts": {
     "start": "node app.js",

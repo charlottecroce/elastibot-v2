@@ -55,8 +55,8 @@ async function main() {
   registerBoltErrorHandler(app);
 
   // Declared before app.start() so a SIGTERM during startup still takes the
-  // graceful path
-  let watchers = { stop: async () => {} };
+  // graceful path. Same shape as a real runner, so nothing has to null-check it
+  let watchers = { stop: async () => {}, isRunning: () => false };
   let shuttingDown = false;
 
   const shutdown = async (signal) => {

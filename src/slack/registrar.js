@@ -100,9 +100,9 @@ module.exports = function createRegistrar(app, ctx) {
         const text = (args.command?.text || '').trim();
         const argv = text ? text.split(/\s+/) : [];
 
-        if (usage && argv.length < minArgs) {
-          await reply.ephemeral(usage);
-          log.debug('usage shown', { argc: argv.length });
+        if (argv.length < minArgs) {
+          await reply.ephemeral(usage || `That command needs at least ${minArgs} argument(s).`);
+          log.debug('usage shown', { argc: argv.length, minArgs });
           return;
         }
 

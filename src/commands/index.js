@@ -16,14 +16,15 @@ const log = logger.child({ scope: 'commands' });
 
 function discover(dir) {
   return fs
-    .readdirSync(dir)
+    .readdirSync(dir, { withFileTypes: true })
     .filter(
-      (f) =>
-        f.endsWith('.js') &&
-        f !== 'index.js' &&
-        !f.startsWith('_') &&
-        !f.endsWith('.test.js')
+      (entry) =>
+        entry.isFile() &&
+        entry.name.endsWith('.js') &&
+        entry.name !== 'index.js' &&
+        !entry.name.startsWith('_')
     )
+    .map((entry) => entry.name)
     .sort(); // deterministic registration order
 }
 

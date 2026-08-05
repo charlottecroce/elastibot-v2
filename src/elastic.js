@@ -16,9 +16,13 @@ const { DEFAULT_SPACE, UNKNOWN_RULE } = require('./constants');
  */
 
 /*
- * The field the alert watcher pages on. getAlertsSince filters (`gt`) and sorts
- * on it, and toAlert exposes it as `cursorTimestamp`. Changing this means
- * changing getAlertsSince and watchers/alerts.js together
+ * The ingest timestamp. Every query in this file ranges and sorts on it:
+ * getAlertsSince pages on it, getRelatedAlerts bounds the burst window on it,
+ * and getAlertStats buckets on it. toAlert exposes it as `cursorTimestamp`.
+ *
+ * NOTE this is NOT the same field as alert.timestamp, which prefers
+ * kibana.alert.@timestamp (the detection time) and falls back to this one.
+ * Changing CURSOR_FIELD changes all three queries and watchers/alerts.js
  */
 const CURSOR_FIELD = '@timestamp';
 
@@ -39,8 +43,8 @@ function field(source, dotted) {
 }
 
 /** Kibana solution "owner" derived from an alert's rule consumer */
-function ownerFromConsumer(consumer, fallback = config.elastic.defaultOwner) {
-  if (!consumer) return fallback;
+function ownerFromConsumer(consumer) {
+  if (!consumer) return config.elastic.defaultOwner;
   if (consumer === 'siem') return 'securitySolution';
   const observability = [
     'logs', 'metrics', 'apm', 'uptime', 'slo',
@@ -56,10 +60,10 @@ function ownerFromConsumer(consumer, fallback = config.elastic.defaultOwner) {
  * `timestamp` is for display and grouping; `cursorTimestamp` is for paging.
  * They come from different fields and are not interchangeable
  */
-function toAlert(hit, { includeSource = false } = {}) {
+function toAlert(hit) {
   const src = hit._source || {};
   const spaceIds = field(src, 'kibana.space_ids');
-  const alert = {
+  return {
     id: hit._id,
     index: hit._index,
     spaceId: (Array.isArray(spaceIds) ? spaceIds[0] : spaceIds) || DEFAULT_SPACE,
@@ -72,8 +76,6 @@ function toAlert(hit, { includeSource = false } = {}) {
     userName: field(src, 'user.name'),
     hostName: field(src, 'host.name'),
   };
-  if (includeSource) alert.source = src;
-  return alert;
 }
 
 /**
@@ -121,8 +123,6 @@ function buildElasticClient(apiKey) {
   const alertsPath = `/${encodeURIComponent(config.elastic.alertsIndex)}/_search`;
 
   return {
-    field,
-
     /** Resolve a single alert document by its _id */
     async getAlertById(alertId) {
       const { data } = await es.post(alertsPath, {
@@ -131,7 +131,7 @@ function buildElasticClient(apiKey) {
       });
       const hit = data?.hits?.hits?.[0];
       if (!hit) return null;
-      return toAlert(hit, { includeSource: true });
+      return toAlert(hit);
     },
 
     /** Alerts with CURSOR_FIELD strictly after `sinceIso`, oldest first */
@@ -150,17 +150,25 @@ function buildElasticClient(apiKey) {
     /**
      * All alerts for a user + host in a space within [from, to] (inclusive)
      * Used to combine a burst of related alerts into a single case
+     *
+     * `from` and `to` MUST be ingest timestamps (alert.cursorTimestamp), because
+     * that is the field ranged on below. Passing detection times
+     * (alert.timestamp, which prefers kibana.alert.@timestamp) returns the wrong
+     * set whenever the two clocks drift, and does it silently - the case is
+     * created, it just holds the wrong alerts. grouping.js supplies these as
+     * group.queryFrom / group.queryTo, kept separate from the from/to shown in
+     * the Slack message
      */
     async getRelatedAlerts({ spaceId, userName, hostName, from, to, size = 200 }) {
       const must = [
         { term: { 'user.name': userName } },
         { term: { 'host.name': hostName } },
-        { range: { '@timestamp': { gte: from, lte: to } } },
+        { range: { [CURSOR_FIELD]: { gte: from, lte: to } } },
       ];
       if (spaceId) must.push({ term: { 'kibana.space_ids': spaceId } });
       const { data } = await es.post(alertsPath, {
         size,
-        sort: [{ '@timestamp': 'asc' }],
+        sort: [{ [CURSOR_FIELD]: 'asc' }],
         query: { bool: { must } },
       });
       return (data?.hits?.hits || []).map((hit) => toAlert(hit));
@@ -185,7 +193,7 @@ function buildElasticClient(apiKey) {
       topN = 10,
       timeZone = 'UTC',
     }) {
-      const filter = [{ range: { '@timestamp': { gte: from, lte: to } } }];
+      const filter = [{ range: { [CURSOR_FIELD]: { gte: from, lte: to } } }];
       if (spaceId) filter.push({ term: { 'kibana.space_ids': spaceId } });
       if (ruleName) filter.push({ term: { 'kibana.alert.rule.name': ruleName } });
       if (hostName) filter.push({ term: { 'host.name': hostName } });
@@ -203,7 +211,7 @@ function buildElasticClient(apiKey) {
               hosts: { cardinality: { field: 'host.name' } },
               users: { cardinality: { field: 'user.name' } },
               risk: { avg: { field: 'kibana.alert.risk_score' } },
-              last_seen: { max: { field: '@timestamp' } },
+              last_seen: { max: { field: CURSOR_FIELD } },
               // Alerts attached to a case carry kibana.alert.case_ids - our in-index signal that an analyst thought the alert mattered enough to make a case
               in_cases: { filter: { exists: { field: 'kibana.alert.case_ids' } } },
             },
@@ -223,7 +231,7 @@ function buildElasticClient(apiKey) {
           // client-side, which keeps the query free of runtime scripts
           over_time: {
             date_histogram: {
-              field: '@timestamp',
+              field: CURSOR_FIELD,
               calendar_interval: 'hour',
               time_zone: timeZone,
               format: "yyyy-MM-dd'T'HH",
@@ -235,14 +243,16 @@ function buildElasticClient(apiKey) {
       return data;
     },
 
-    /** Kibana space display name (falls back to the id) */
+    /**
+     * Kibana space display name.
+     *
+     * Errors propagate on purpose. services/spaceService owns the fallback, so
+     * that a real outage produces one warn line there instead of being silently
+     * turned into a plausible-looking space id in two places
+     */
     async getSpaceName(spaceId) {
-      try {
-        const { data } = await kib.get(`/api/spaces/space/${encodeURIComponent(spaceId)}`);
-        return data?.name || spaceId;
-      } catch {
-        return spaceId;
-      }
+      const { data } = await kib.get(`/api/spaces/space/${encodeURIComponent(spaceId)}`);
+      return data?.name || spaceId;
     },
 
     /** Create a case in the given space. Returns the raw case object */
@@ -296,7 +306,8 @@ function buildElasticClient(apiKey) {
 
 /*
  * Clients are cached per API key. The TTL bounds how long a revoked key keeps a
- * working client; the cap bounds memory.
+ * working client; the cap bounds memory. commands/start.js also invalidates
+ * explicitly when an analyst re-registers, so a rotation takes effect at once
  *
  * The cache key is a secret. It stays in memory and is never logged - TtlCache
  * exposes `size`, never its keys
@@ -311,7 +322,7 @@ function createElasticClient(apiKey) {
   return clientCache.getOrCreate(apiKey, buildElasticClient);
 }
 
-/** Drop a cached client, e.g. when an analyst re-registers with a new key */
+/** Drop a cached client. Called when an analyst re-registers with a new key */
 function invalidateClient(apiKey) {
   return clientCache.delete(apiKey);
 }

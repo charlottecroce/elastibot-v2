@@ -9,7 +9,7 @@ const {
   shapeStats,
   getAlertStatistics,
 } = require('../src/services/statsService');
-const { UserFacingError } = require('../src/services/caseService');
+const { UserFacingError } = require('../src/util/errors');
 const { statsBlocks } = require('../src/services/format');
 
 /*
