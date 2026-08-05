@@ -281,7 +281,7 @@ function statsBlocks(stats) {
     .join('  ·  ');
 
   const header = [
-    section(`:bar_chart: *Alert statistics* — last *${esc(query.windowLabel)}*`),
+    section(`*Alert statistics* — last *${esc(query.windowLabel)}*`),
     {
       type: 'context',
       elements: [
