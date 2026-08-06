@@ -1,0 +1,21 @@
+site_name: elastibot-v2
+site_description: Documentation for elastibot-v2
+repo_url: https://github.com/charlottecroce/elastibot-v2
+repo_name: elastibot-v2
+edit_uri: edit/main/docs/
+
+theme:
+  name: readthedocs
+  highlightjs: true
+
+nav:
+  - Getting Started: index.md
+  - About elastibot-v2: about.md
+  - Developer Guide: developer-guide.md
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - fenced_code
+  - codehilite
+  - admonition

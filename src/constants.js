@@ -9,6 +9,16 @@
 /** Slack action_ids (buttons, selects) */
 const ACTIONS = Object.freeze({
   CREATE_CASE_FROM_ALERT: 'create_case_from_alert',
+  // "Add N new alerts to case" - attaches everything on an incident message
+  // that isn't on its case yet
+  ADD_ALERTS_TO_CASE: 'add_alerts_to_case',
+  // "View case" is a url button. Slack still delivers an interaction for those,
+  // so it needs a registered no-op handler or Bolt logs an unhandled action on
+  // every single click
+  VIEW_CASE: 'view_case',
+  // /start's radio input toggling between "paste my own key" and "create one
+  // for me" - swaps the modal's blocks via views.update
+  START_METHOD_SELECT: 'start_method_select',
 });
 
 /** Slack view callback_ids (modals) */

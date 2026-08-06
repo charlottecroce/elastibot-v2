@@ -116,6 +116,10 @@ async function createCaseFromAlerts(client, alerts) {
   }
 
   let attached = 0;
+  // Which ids actually made it onto the case, not just how many. The incident
+  // store needs the exact ids (recordCase / recordAttached), not a count - a
+  // count alone can't tell "pending" apart from "attached"
+  const attachedIds = [];
   const failures = [];
   for (const list of byRule.values()) {
     try {
@@ -127,6 +131,7 @@ async function createCaseFromAlerts(client, alerts) {
         owner,
       });
       attached += list.length;
+      attachedIds.push(...list.map((a) => a.id));
     } catch (err) {
       failures.push(
         `${list[0].ruleName} ×${list.length} (${describeAxiosError(err, 'attach').message})`
@@ -161,6 +166,7 @@ async function createCaseFromAlerts(client, alerts) {
     ruleCounts,
     alertCount: alerts.length,
     attachedCount: attached,
+    attachedIds,
     warning: failures.length ? `Some alerts didn't attach: ${failures.join('; ')}` : null,
     link: caseUrl(spaceId, caseId, owner),
   };
@@ -169,7 +175,7 @@ async function createCaseFromAlerts(client, alerts) {
 /**
  * /case <alertID> and the singleton "Create case" button
  * Files just the given alert into a case - no sibling gathering. The grouped
- * "Create case" button uses createCaseForGroup to combine a whole incident
+ * "Create case" button uses createCaseForIds to combine a whole incident
  *
  * @param {string} apiKey    the analyst's Elastic API key
  * @param {string} alertId
@@ -193,8 +199,15 @@ async function createCaseForAlert(apiKey, alertId) {
 }
 
 /**
- * The grouped "Create case" button. Re-runs the user+host+time-range query so
- * the case captures the whole burst (and any stragglers) at click time
+ * The grouped "Create case" button, driven by a query rather than a known id
+ * list. Re-runs the user+host+time-range query so the case captures the whole
+ * burst (and any stragglers) at click time.
+ *
+ * NOTE: the incident-based flow (src/commands/case.js) uses createCaseForIds
+ * instead, since an open incident record already carries the authoritative
+ * alert id list - it does not need (and must not get) a fresh query that could
+ * disagree with what the Slack message is showing. This function remains for
+ * any caller that only has a user+host+time descriptor, not a concrete id list.
  */
 async function createCaseForGroup(apiKey, { spaceId, userName, hostName, from, to }) {
   const client = createElasticClient(apiKey);
@@ -230,6 +243,126 @@ async function createCaseForGroup(apiKey, { spaceId, userName, hostName, from, t
   }
 
   return createCaseFromAlerts(client, alerts);
+}
+
+/**
+ * Create one case from an explicit list of alert ids already known to the
+ * caller - an open incident's rec.alertIds. Unlike createCaseForGroup, this
+ * does NOT re-run the user+host+time query: the incident record is already
+ * the authoritative list of what the Slack message shows, and a fresh query
+ * could disagree with it (an alert that aged out of the window, a stale
+ * cursor, etc). Backs the green "Create case" button on a posted incident.
+ *
+ * @param {string} apiKey
+ * @param {string[]} alertIds
+ * @param {object} [opts]
+ * @param {string} [opts.spaceId] expected space. Fetched alerts are filtered
+ *   to it as a sanity check - an id that resolved to a different space than
+ *   the incident it came from would otherwise silently end up in the wrong
+ *   case
+ * @returns {Promise<object>} same shape as createCaseFromAlerts, including attachedIds
+ */
+async function createCaseForIds(apiKey, alertIds, { spaceId } = {}) {
+  const client = createElasticClient(apiKey);
+
+  let fetched;
+  try {
+    fetched = await Promise.all(
+      alertIds.map((id) => client.getAlertById(id).catch(() => null))
+    );
+  } catch (err) {
+    throw describeAxiosError(err, 'Looking up alerts');
+  }
+
+  let alerts = dedupeById(fetched.filter(Boolean));
+  if (spaceId) alerts = alerts.filter((a) => a.spaceId === spaceId);
+
+  if (!alerts.length) {
+    throw new UserFacingError(
+      'None of these alerts could be found — they may have aged out of the index.'
+    );
+  }
+
+  return createCaseFromAlerts(client, alerts);
+}
+
+/**
+ * Attach a batch of already-known alert ids to an EXISTING case, in the same
+ * per-rule batches createCaseFromAlerts uses. Backs the "Add N new alerts to
+ * case" button on a posted incident - the case already exists by this point,
+ * so there is no title/owner logic here, only the attach step
+ *
+ * @param {string} apiKey
+ * @param {object} opts
+ * @param {string} opts.spaceId
+ * @param {string} opts.caseId
+ * @param {string[]} opts.alertIds  the incident's pending ids
+ * @returns {Promise<{caseId: string, attachedIds: string[], warning: string|null}>}
+ */
+async function attachAlertsToCase(apiKey, { spaceId, caseId, alertIds }) {
+  const client = createElasticClient(apiKey);
+
+  let fetched;
+  try {
+    fetched = await Promise.all(
+      alertIds.map((id) => client.getAlertById(id).catch(() => null))
+    );
+  } catch (err) {
+    throw describeAxiosError(err, 'Looking up alerts');
+  }
+
+  const alerts = dedupeById(fetched.filter(Boolean));
+  if (!alerts.length) {
+    // Nothing to attach is not fatal - the caller (commands/case.js) still has
+    // a valid case and should just report that nothing new landed
+    return {
+      caseId,
+      attachedIds: [],
+      warning:
+        "None of the pending alerts could be found — they may have aged out of the index.",
+    };
+  }
+
+  const byRule = new Map();
+  for (const a of alerts) {
+    const key = a.ruleId || a.ruleName || 'unknown';
+    if (!byRule.has(key)) byRule.set(key, []);
+    byRule.get(key).push(a);
+  }
+
+  const attachedIds = [];
+  const failures = [];
+  for (const list of byRule.values()) {
+    try {
+      await client.attachAlert(spaceId, caseId, {
+        type: 'alert',
+        alertId: list.map((a) => a.id),
+        index: list.map((a) => a.index),
+        rule: { id: list[0].ruleId, name: list[0].ruleName },
+        owner: list[0].owner || config.elastic.defaultOwner,
+      });
+      attachedIds.push(...list.map((a) => a.id));
+    } catch (err) {
+      failures.push(
+        `${list[0].ruleName} ×${list.length} (${describeAxiosError(err, 'attach').message})`
+      );
+    }
+  }
+
+  if (failures.length) {
+    log.warn('some alerts did not attach to an existing case', {
+      caseId,
+      spaceId,
+      attached: attachedIds.length,
+      failed: alerts.length - attachedIds.length,
+    });
+  }
+
+  return {
+    caseId,
+    attachedIds,
+    warning: failures.length ? `Some alerts didn't attach: ${failures.join('; ')}` : null,
+  };
 }
 
 /**
@@ -307,5 +440,7 @@ async function addAlertToCase(apiKey, caseId, alertId) {
 module.exports = {
   createCaseForAlert,
   createCaseForGroup,
+  createCaseForIds,
+  attachAlertsToCase,
   addAlertToCase,
 };

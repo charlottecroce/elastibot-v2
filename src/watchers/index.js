@@ -30,7 +30,7 @@ const noopRunner = () => ({ stop: async () => {}, isRunning: () => false });
  * Start the polling loop.
  *
  * @param {object} app  Bolt app
- * @param {object} ctx  application context ({ state, spaces })
+ * @param {object} ctx  application context ({ state, incidents, spaces })
  * @returns {{stop: function(): Promise<void>, isRunning: function(): boolean}}
  */
 function startWatchers(app, ctx) {
@@ -56,6 +56,9 @@ function startWatchers(app, ctx) {
   const deps = {
     slack: app.client,
     state: ctx.state,
+    // The alert watcher merges into and updates incidents it posted on earlier
+    // ticks, so it needs the same store the button handlers claim against
+    incidents: ctx.incidents,
     spaces: ctx.spaces,
     elastic,
     channelFor,
@@ -79,6 +82,7 @@ function startWatchers(app, ctx) {
     cases: config.watchers.cases.enabled,
     caseSpaces: config.watchers.cases.spaces,
     casePerPage: config.watchers.cases.perPage,
+    incidentIdleMs: config.incidents.idleMs,
   });
 
   return runner;

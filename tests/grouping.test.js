@@ -1,14 +1,15 @@
 'use strict';
 
-const {
-  groupAlerts,
-  makeGroup,
-  encodeGroupValue,
-  decodeGroupValue,
-} = require('../src/grouping');
+const { groupAlerts, makeGroup, isMachineUser, bareUser } = require('../src/grouping');
 
 /*
- * Grouping decides how many messages hit the channel and how many alerts land in one case
+ * Grouping decides how many messages hit the channel and how many alerts land
+ * in one case.
+ *
+ * Two things it has to get right:
+ *   - a service account must not split one analyst's incident into three
+ *     messages (the merge)
+ *   - two analysts on a shared host must not end up in one case (the limit)
  */
 
 const T0 = '2026-07-30T12:00:00.000Z';
@@ -32,6 +33,11 @@ function alert(id, over = {}) {
 /** t0 + n minutes, as ISO */
 function at(minutes) {
   return new Date(Date.parse(T0) + minutes * 60000).toISOString();
+}
+
+/** ids of each group, sorted, so assertions don't depend on group order */
+function idsOf(groups) {
+  return groups.map((g) => g.alerts.map((a) => a.id).sort()).sort((a, b) => a[0] < b[0] ? -1 : 1);
 }
 
 describe('groupAlerts', () => {
@@ -67,29 +73,29 @@ describe('groupAlerts', () => {
     expect(groups.map((g) => g.count).sort()).toEqual([1, 2]);
   });
 
-  test('different host, user or space never merge', () => {
+  test('different host or space never merge', () => {
     const groups = groupAlerts(
       [
         alert('a'),
         alert('b', { hostName: 'web-02' }),
-        alert('c', { userName: 'adoe' }),
         alert('d', { spaceId: 'soc' }),
       ],
       HOUR
     );
-    expect(groups).toHaveLength(4);
+    expect(groups).toHaveLength(3);
   });
 
-  test('alerts without user or host each become their own group', () => {
+  test('an alert with no host is uncorrelatable and stays a singleton', () => {
+    // Host is the axis grouping hangs on now, so losing it is what isolates an
+    // alert. Losing only the user does not - see the machine-identity block
     const groups = groupAlerts(
       [
-        alert('a', { userName: undefined }),
-        alert('b', { hostName: undefined }),
-        alert('c', { userName: undefined, hostName: undefined }),
+        alert('a', { hostName: undefined }),
+        alert('b', { hostName: undefined, userName: undefined }),
       ],
       HOUR
     );
-    expect(groups).toHaveLength(3);
+    expect(groups).toHaveLength(2);
     expect(groups.every((g) => g.count === 1)).toBe(true);
   });
 
@@ -104,6 +110,128 @@ describe('groupAlerts', () => {
 
   test('empty input > no groups', () => {
     expect(groupAlerts([], HOUR)).toEqual([]);
+  });
+});
+
+/*
+ * The reason this pass exists: an analyst session on one host fires alerts under
+ * their own name AND under whatever service account ran the command. Those used
+ * to be separate messages with separate green buttons, which is how the same
+ * incident ended up in two cases
+ */
+describe('machine identities', () => {
+  test('recognises service, system and computer accounts', () => {
+    expect(isMachineUser('SYSTEM')).toBe(true);
+    expect(isMachineUser('NT AUTHORITY\\SYSTEM')).toBe(true);
+    expect(isMachineUser('LOCAL SERVICE')).toBe(true);
+    expect(isMachineUser('CORP\\svc_backup')).toBe(true);
+    expect(isMachineUser('WEB-01$')).toBe(true); // AD computer account
+    expect(isMachineUser('root')).toBe(true);
+    expect(isMachineUser('_apt')).toBe(true);
+    expect(isMachineUser(undefined)).toBe(true); // absent says nothing about who
+  });
+
+  test('a human account is not a machine one', () => {
+    expect(isMachineUser('jsmith')).toBe(false);
+    expect(isMachineUser('CORP\\jsmith')).toBe(false);
+  });
+
+  test('the domain prefix is stripped before matching', () => {
+    expect(bareUser('NT AUTHORITY\\SYSTEM')).toBe('SYSTEM');
+    expect(bareUser('CORP/jsmith')).toBe('jsmith');
+    expect(bareUser('jsmith')).toBe('jsmith');
+    expect(bareUser(undefined)).toBeNull();
+  });
+
+  test('machine identities fold into the human incident on the same host', () => {
+    const groups = groupAlerts(
+      [
+        alert('u1', { timestamp: at(0) }),
+        alert('s1', { userName: 'SYSTEM', timestamp: at(1) }),
+        alert('s2', { userName: 'NT AUTHORITY\\SYSTEM', timestamp: at(2) }),
+        alert('u2', { timestamp: at(3) }),
+        alert('v1', { userName: 'svc_backup', timestamp: at(4) }),
+        alert('n1', { userName: undefined, timestamp: at(5) }),
+      ],
+      HOUR
+    );
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].count).toBe(6);
+    // The human name labels the incident even though SYSTEM fired more of it
+    expect(groups[0].userName).toBe('jsmith');
+    expect(groups[0].machineOnly).toBe(false);
+  });
+
+  test('the same account under two spellings counts once', () => {
+    // userNames is what incidents.findMatch compares across polls, so a
+    // duplicate here would look like two users and split the incident
+    const g = makeGroup([
+      alert('a', { userName: 'SYSTEM' }),
+      alert('b', { userName: 'NT AUTHORITY\\SYSTEM' }),
+    ]);
+    expect(g.userNames).toEqual(['SYSTEM']);
+  });
+
+  test('two humans on a shared host stay separate', () => {
+    // The limit on the merge. Collapsing these would put one analyst's alerts
+    // in the other's case
+    const groups = groupAlerts(
+      [
+        alert('j1', { timestamp: at(0) }),
+        alert('a1', { userName: 'adoe', timestamp: at(5) }),
+      ],
+      HOUR
+    );
+    expect(groups).toHaveLength(2);
+    expect(groups.map((g) => g.userName).sort()).toEqual(['adoe', 'jsmith']);
+  });
+
+  test('a machine cluster outside the window is not dragged in', () => {
+    const groups = groupAlerts(
+      [
+        alert('u1', { timestamp: at(0) }),
+        alert('s1', { userName: 'SYSTEM', timestamp: at(400) }),
+      ],
+      HOUR
+    );
+    expect(idsOf(groups)).toEqual([['s1'], ['u1']]);
+  });
+
+  test('a host with only service accounts collapses to one incident', () => {
+    const groups = groupAlerts(
+      [
+        alert('s1', { userName: 'SYSTEM', timestamp: at(0) }),
+        alert('s2', { userName: 'svc_backup', timestamp: at(5) }),
+        alert('s3', { userName: undefined, timestamp: at(9) }),
+      ],
+      HOUR
+    );
+    expect(groups).toHaveLength(1);
+    expect(groups[0].machineOnly).toBe(true);
+  });
+
+  test('machine identities never cross hosts', () => {
+    const groups = groupAlerts(
+      [
+        alert('u1', { timestamp: at(0) }),
+        alert('h1', { hostName: 'web-02', userName: 'SYSTEM', timestamp: at(1) }),
+      ],
+      HOUR
+    );
+    expect(idsOf(groups)).toEqual([['h1'], ['u1']]);
+  });
+
+  test('mergeMachineUsers off restores the old user+host split', () => {
+    const groups = groupAlerts(
+      [
+        alert('u1', { timestamp: at(0) }),
+        alert('s1', { userName: 'SYSTEM', timestamp: at(1) }),
+      ],
+      HOUR,
+      { mergeMachineUsers: false }
+    );
+    expect(idsOf(groups)).toEqual([['s1'], ['u1']]);
   });
 });
 
@@ -126,38 +254,10 @@ describe('makeGroup', () => {
     ]);
     expect(g.topSeverity).toBe('low');
   });
-});
 
-describe('encode / decode button value', () => {
-  test('a correlatable group carries query coordinates, not alert ids', () => {
-    const g = makeGroup([alert('a', { timestamp: at(0) }), alert('b', { timestamp: at(10) })]);
-    const decoded = decodeGroupValue(encodeGroupValue(g));
-    expect(decoded).toEqual({
-      k: 'g',
-      s: 'default',
-      u: 'jsmith',
-      h: 'web-01',
-      f: at(0),
-      t: at(10),
-    });
-  });
-
-  test('an uncorrelatable singleton carries just the alert id', () => {
-    const g = makeGroup([alert('lonely', { userName: undefined })]);
-    expect(decodeGroupValue(encodeGroupValue(g))).toEqual({ k: 'a', a: 'lonely' });
-  });
-
-  test('stays under the 2000 char Slack button limit for a big burst', () => {
-    const many = Array.from({ length: 200 }, (_, i) => alert(`alert-${i}`, { timestamp: at(i % 30) }));
-    expect(encodeGroupValue(makeGroup(many)).length).toBeLessThan(2000);
-  });
-
-  test('a bare alert id decodes as a singleton', () => {
-    expect(decodeGroupValue('raw-alert-id')).toEqual({ k: 'a', a: 'raw-alert-id' });
-  });
-
-  test('unparseable or unexpected JSON falls back to a singleton', () => {
-    expect(decodeGroupValue('{not json')).toEqual({ k: 'a', a: '{not json' });
-    expect(decodeGroupValue('{"k":"x"}')).toEqual({ k: 'a', a: '{"k":"x"}' });
+  test('a group with no human identity reports machineOnly', () => {
+    const g = makeGroup([alert('a', { userName: 'SYSTEM' })]);
+    expect(g.machineOnly).toBe(true);
+    expect(g.userName).toBe('SYSTEM'); // still labelled, just not by a human
   });
 });

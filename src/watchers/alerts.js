@@ -2,8 +2,9 @@
 
 const config = require('../../config');
 const { CURSOR_FIELD } = require('../elastic');
-const { alertGroupBlocks } = require('../services/format');
-const { groupAlerts, encodeGroupValue } = require('../grouping');
+const { incidentMessage } = require('../services/incidentBlocks');
+const { renderIncident } = require('../services/incidentRender');
+const { groupAlerts } = require('../grouping');
 const { STATE_KEYS } = require('../constants');
 const { logger } = require('../util/logger');
 
@@ -11,7 +12,9 @@ const { logger } = require('../util/logger');
  * The alert watcher.
  *
  * Asks Elastic for alerts newer than the saved cursor, collapses related ones
- * into incidents, and posts one message per incident to the routed channel.
+ * into incidents, and either posts a new message or updates the message an
+ * earlier tick already posted for that incident
+ *
  *
  * On first run (no saved cursor) we start watching from "now" instead of
  * backfilling history, so a fresh deploy doesn't flood the channel and trip
@@ -26,15 +29,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * @param {object} deps
- * @param {object} deps.slack    Bolt web client
- * @param {object} deps.state    StateStore
- * @param {object} deps.elastic  Elastic service client
- * @param {object} deps.spaces   space service (getName)
+ * @param {object} deps.slack      Bolt web client
+ * @param {object} deps.state      StateStore
+ * @param {object} deps.incidents  IncidentStore
+ * @param {object} deps.elastic    Elastic service client
+ * @param {object} deps.spaces     space service (getName)
  * @param {function} deps.channelFor  spaceId > channel id
- * @returns {Promise<{posted:number,skipped:number,failed:number}>}
+ * @returns {Promise<{posted:number,updated:number,skipped:number,failed:number,reaped:number}>}
  */
-async function pollAlerts({ slack, state, elastic, spaces, channelFor }) {
-  const result = { posted: 0, skipped: 0, failed: 0 };
+async function pollAlerts({ slack, state, incidents, elastic, spaces, channelFor }) {
+  const result = { posted: 0, updated: 0, skipped: 0, failed: 0, reaped: 0 };
+
+  // Reap first. An incident that went quiet overnight must not absorb this
+  // morning's alerts into a message nobody is reading any more
+  result.reaped = incidents.sweep();
+
   const since = state.get(STATE_KEYS.ALERTS_LAST_TS, null);
 
   // First run: start from now, don't replay history
@@ -67,7 +76,8 @@ async function pollAlerts({ slack, state, elastic, spaces, channelFor }) {
     });
   }
 
-  // Collapse related alerts (same user + host, within the window) into incidents
+  // Collapse related alerts into incidents. See grouping.js for the machine
+  // identity merge that stops SYSTEM splitting a host off from its user
   const groups = groupAlerts(alerts, config.grouping.windowMs);
   log.info('new alerts', { alerts: alerts.length, incidents: groups.length, since });
 
@@ -84,34 +94,28 @@ async function pollAlerts({ slack, state, elastic, spaces, channelFor }) {
       continue;
     }
 
-    const spaceName = await spaces.getName(group.spaceId, elastic);
+    // Does this burst belong to something already on the wall?
+    const existing = incidents.findMatch(group);
 
     try {
-      await slack.chat.postMessage({
-        channel,
-        text:
-          group.count > 1
-            ? `${group.count} related alerts: ${group.representativeRule}`
-            : `New alert: ${group.representativeRule}`,
-        blocks: alertGroupBlocks({
-          count: group.count,
-          representativeRule: group.representativeRule,
-          ruleCounts: group.ruleCounts,
-          topSeverity: group.topSeverity,
-          userName: group.userName,
-          hostName: group.hostName,
-          spaceName,
-          from: group.from,
-          to: group.to,
-          alertId: group.alerts[0].id,
-          buttonValue: encodeGroupValue(group),
-        }),
-      });
-      result.posted += 1;
+      if (existing) {
+        // No space lookup here - the record already carries its display name,
+        // and on a cold cache getName is an HTTP round trip per group
+        await updateIncident({ slack, incidents, existing, group, result });
+      } else {
+        const spaceName = await spaces.getName(group.spaceId, elastic);
+        await postIncident({ slack, incidents, group, channel, spaceName, result });
+      }
       await sleep(config.watchers.postDelayMs);
     } catch (err) {
       result.failed += 1;
-      log.warn('post failed', { err, channel, spaceId: group.spaceId, count: group.count });
+      log.warn('incident post/update failed', {
+        err,
+        channel,
+        spaceId: group.spaceId,
+        host: group.hostName,
+        count: group.count,
+      });
     }
   }
 
@@ -121,6 +125,7 @@ async function pollAlerts({ slack, state, elastic, spaces, channelFor }) {
     log.error('some incidents were not posted and will not be retried', {
       failed: result.failed,
       posted: result.posted,
+      updated: result.updated,
     });
   }
 
@@ -156,6 +161,64 @@ async function pollAlerts({ slack, state, elastic, spaces, channelFor }) {
 
   log.debug('alert poll complete', { ...result, cursor: newest });
   return result;
+}
+
+/**
+ * First sighting of this incident.
+ *
+ * The record is opened before the message is posted, because the buttons carry
+ * the incident key and the key has to exist to render them.
+ */
+async function postIncident({ slack, incidents, group, channel, spaceName, result }) {
+  const rec = incidents.open({ group, channel, spaceName });
+
+  let posted;
+  try {
+    const msg = incidentMessage(rec, incidents.pending(rec));
+    posted = await slack.chat.postMessage({ channel, ...msg });
+  } catch (err) {
+    // Leaving the record would make findMatch fold the next tick's alerts into
+    // a message that does not exist, and they would never be seen again
+    incidents.discard(rec.key);
+    throw err;
+  }
+
+  incidents.setMessage(rec.key, { channel, messageTs: posted.ts });
+
+  result.posted += 1;
+  log.info('incident posted', {
+    key: rec.key,
+    host: rec.hostName,
+    user: rec.primaryUser,
+    users: rec.userNames,
+    count: rec.alertIds.length,
+  });
+}
+
+/** Fold into an existing incident and re-render its message in place */
+async function updateIncident({ slack, incidents, existing, group, result }) {
+  const { rec, addedIds } = incidents.merge(existing.key, group);
+
+  if (!addedIds.length) {
+    // Every alert in this burst is already on the message. Happens when a poll
+    // overlaps its predecessor; nothing to say
+    result.skipped += 1;
+    log.debug('incident merge added nothing new', { key: rec.key });
+    return;
+  }
+
+  const pending = incidents.pending(rec);
+
+  await renderIncident(slack, incidents, rec.key, { repostIfGone: true });
+
+  result.updated += 1;
+  log.info('incident updated', {
+    key: rec.key,
+    added: addedIds.length,
+    total: rec.alertIds.length,
+    pending: pending.length,
+    caseId: rec.caseId,
+  });
 }
 
 module.exports = { pollAlerts };
