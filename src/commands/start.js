@@ -18,14 +18,15 @@ const { VIEWS, COMMANDS, ACTIONS } = require('../constants');
  *      to create a key in Kibana and lets the analyst paste it privately.
  *
  *   2. CREATE ONE FOR ME - Elastibot calls POST /_security/api_key itself,
- *      using an admin-supplied credential the analyst pastes in for that one
- *      request only. Like a UAC prompt: the analyst's own Slack identity never
- *      gains any privilege from this, the admin credential is never stored,
- *      cached, or logged, and the key handed back is always restricted to
- *      config.elastic.analystRoleDescriptors regardless of what the admin
- *      credential itself is allowed to do. Only offered to Slack users listed
- *      in config.security.autoProvisionSlackIds - empty by default, meaning
- *      nobody sees it until an operator opts specific people in
+ *      authenticating with an admin's Elastic username and password (HTTP
+ *      Basic) that the analyst enters for that one request only. Like a UAC
+ *      prompt: the analyst's own Slack identity never gains any privilege from
+ *      this, the admin credential is never stored, cached, or logged, and the
+ *      key handed back is always restricted to config.elastic.analystRoleDescriptors
+ *      regardless of what the admin account itself is allowed to do. Only
+ *      offered to Slack users listed in config.security.autoProvisionSlackIds -
+ *      empty by default, meaning nobody sees it until an operator opts
+ *      specific people in
  *
  * The modal submission acks itself - it uses response_action to surface a
  * validation error inside the modal - so it's registered with the view helper,
@@ -34,7 +35,9 @@ const { VIEWS, COMMANDS, ACTIONS } = require('../constants');
  * round trip to Elastic, which can run past Slack's ~3s view-submission ack
  * window, so that path acks immediately and reports success/failure by DM
  * instead of via response_action
- * 
+ *
+ * Modal construction and the small helpers the view-submission handler needs
+ * live in services/startService.js - this file only wires them up to Slack
  */
 
 module.exports = function registerStart(reg) {
@@ -89,14 +92,19 @@ module.exports = function registerStart(reg) {
     const kibanaUsername = parseKibanaUsername(view.private_metadata, log);
 
     if (method === 'auto') {
-      const adminApiKey = String(values.admin_key_block?.admin_key_input?.value ?? '').trim();
+      const adminUsername = String(
+        values.admin_username_block?.admin_username_input?.value ?? ''
+      ).trim();
+      const adminPassword = String(
+        values.admin_password_block?.admin_password_input?.value ?? ''
+      ).trim();
 
-      if (!adminApiKey) {
-        await ack({
-          response_action: 'errors',
-          errors: { admin_key_block: 'Paste an admin API key with permission to create API keys.' },
-        });
-        log.debug('empty admin key submitted');
+      const fieldErrors = {};
+      if (!adminUsername) fieldErrors.admin_username_block = 'Enter the admin username.';
+      if (!adminPassword) fieldErrors.admin_password_block = 'Enter the admin password.';
+      if (Object.keys(fieldErrors).length) {
+        await ack({ response_action: 'errors', errors: fieldErrors });
+        log.debug('incomplete admin credentials submitted');
         return;
       }
 
@@ -110,9 +118,9 @@ module.exports = function registerStart(reg) {
 
       let provisioned;
       try {
-        provisioned = await provisionAnalystApiKey(adminApiKey, keyName);
+        provisioned = await provisionAnalystApiKey(adminUsername, adminPassword, keyName);
       } catch (err) {
-        // Deliberately does NOT log adminApiKey or any part of it
+        // Deliberately does NOT log adminUsername, adminPassword, or any part of them
         log.warn('automatic API key provisioning failed', { kibanaUsername, err });
         await safeDm(
           client,

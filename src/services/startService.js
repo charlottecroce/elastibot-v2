@@ -86,22 +86,34 @@ function startModalView(kibanaUsername, { method = 'manual', canAutoProvision = 
           type: 'mrkdwn',
           text:
             'Elastibot can create a narrowly-scoped API key for you automatically. This needs ' +
-            "*an admin's* Elastic credential with permission to create API keys " +
-            '(`manage_api_key` or `manage_own_api_key`) - paste it below.\n\n' +
-            'It is used *once*, to create your key, and is never stored or logged. ' +
+            "*an admin's* Elastic username and password, for an account with permission to " +
+            'create API keys (`manage_api_key` or `manage_own_api_key`) - enter them below.\n\n' +
+            'They are used *once*, to create your key, and are never stored or logged. ' +
             "The key handed to you is always limited to Elastibot's analyst role " +
-            '(read alerts, manage cases), regardless of what the admin credential itself can do.',
+            '(read alerts, manage cases), regardless of what the admin account itself can do.\n\n' +
+            ':warning: Slack has no masked/password field, so the password will be visible ' +
+            'while typing - same as any other field in this modal.',
         },
       },
       { type: 'divider' },
       {
         type: 'input',
-        block_id: 'admin_key_block',
-        label: { type: 'plain_text', text: "Admin's Elastic API key" },
+        block_id: 'admin_username_block',
+        label: { type: 'plain_text', text: 'Admin username' },
         element: {
           type: 'plain_text_input',
-          action_id: 'admin_key_input',
-          placeholder: { type: 'plain_text', text: 'e.g. VnVhQ2ZHY0JDZGJrU29tZUFwaUtleVZhbHVl' },
+          action_id: 'admin_username_input',
+          placeholder: { type: 'plain_text', text: 'e.g. elastic_admin' },
+        },
+      },
+      {
+        type: 'input',
+        block_id: 'admin_password_block',
+        label: { type: 'plain_text', text: 'Admin password' },
+        element: {
+          type: 'plain_text_input',
+          action_id: 'admin_password_input',
+          placeholder: { type: 'plain_text', text: 'Admin password' },
         },
       }
     );
