@@ -146,18 +146,75 @@ module.exports = {
     // Local persistence (gitignored)
     userStorePath: process.env.USER_STORE_PATH || './data/users.json',
     statePath: process.env.STATE_PATH || './data/state.json',
+    // Posted incidents: message coordinates, which alerts are on which case,
+    // and the create-case claim. Holds no credentials, but losing it means
+    // every open incident forgets its case and offers a green button again
+    incidentStorePath: process.env.INCIDENT_STORE_PATH || './data/incidents.json',
     // 0 = write through on every change. Raise it to batch cursor writes; the
-    // store is flushed on shutdown either way
+    // store is flushed on shutdown either way.
+    // NOTE this does not apply to the incident store, which is always
+    // write-through - see src/context.js for why
     stateDebounceMs: int(process.env.STATE_DEBOUNCE_MS, 0, 'STATE_DEBOUNCE_MS'),
   },
 
   grouping: {
-    // Alerts from the same user + host (same space) within this window are treated
-    // as one incident, collapsed into a single Slack message and, when a case is
+    // Alerts from the same host (same space) within this window are treated as
+    // one incident, collapsed into a single Slack message and, when a case is
     // made, attached together. Default 1 hour
     windowMs: int(process.env.GROUP_WINDOW_MS, 3600000, 'GROUP_WINDOW_MS'),
     // Cap on how many alerts a single grouped case will pull in
     maxAlertsPerCase: int(process.env.GROUP_MAX_ALERTS, 200, 'GROUP_MAX_ALERTS'),
+
+    /*
+     * Fold machine-identity alerts into the human incident on the same host.
+     *
+     * Without this, an analyst session on web-01 that fires alerts under
+     * `jsmith` and alerts under `SYSTEM` (because a service ran the command)
+     * becomes two messages and two cases, even though it is one incident.
+     * Two *human* users on one host still stay separate
+     *
+     * false = the old spaceId + user + host behaviour
+     */
+    mergeMachineUsers: bool(
+      process.env.GROUP_MERGE_MACHINE_USERS, true, 'GROUP_MERGE_MACHINE_USERS'
+    ),
+
+    /*
+     * Identities that say nothing about *who* was at the keyboard. Globs,
+     * case-insensitive, matched after stripping any domain prefix
+     * (NT AUTHORITY\SYSTEM matches SYSTEM). Names ending in `$` are AD computer
+     * accounts and always match whether listed or not, as does an absent user
+     *
+     * TUNE THIS. It is the one setting here that is specific to each environment's naming conventions.
+     * The default list is a reasonable starting point
+     */
+    machineUsers: list(
+      process.env.GROUP_MACHINE_USERS,
+      'SYSTEM,LOCAL SERVICE,NETWORK SERVICE,LOCAL SYSTEM,ANONYMOUS LOGON,' +
+        'root,daemon,nobody,svc_*,svc-*,sa_*,_*'
+    ),
+  },
+
+  // ---------------------------------------------------------------
+  // INCIDENTS
+  // How long a posted incident stays live and updatable. This is what lets a
+  // burst spread across many poll ticks stay as one Slack message with one case
+  // ---------------------------------------------------------------
+  incidents: {
+    // No new alerts for this long and the record is reaped. The next alert on
+    // that host starts a fresh incident with a green Create case button, so
+    // pick something like a shift length rather than something short
+    idleMs: int(process.env.INCIDENT_IDLE_MS, 8 * 3600000, 'INCIDENT_IDLE_MS'),
+    // Hard ceiling regardless of activity. Without it, a host trickling one
+    // alert every 7 hours builds one incident that never ends and a case that
+    // grows without bound
+    maxLifetimeMs: int(
+      process.env.INCIDENT_MAX_LIFETIME_MS, 24 * 3600000, 'INCIDENT_MAX_LIFETIME_MS'
+    ),
+    // How long a create-case claim is honoured before it's treated as abandoned.
+    // Long enough to cover the Elastic round trips, short enough that a handler
+    // dying mid-click doesn't wedge the incident for the rest of the shift
+    claimTtlMs: int(process.env.INCIDENT_CLAIM_TTL_MS, 60000, 'INCIDENT_CLAIM_TTL_MS'),
   },
 
   naming: {

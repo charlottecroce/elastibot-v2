@@ -1,5 +1,6 @@
 'use strict';
 
+const config = require('../config');
 const { UNKNOWN_RULE, SEVERITY_RANK } = require('./constants');
 
 /*
@@ -8,27 +9,29 @@ const { UNKNOWN_RULE, SEVERITY_RANK } = require('./constants');
  * A burst of alerts from the same user on the same host (same space), close
  * together in time, is really one incident - even if the alerts fire different
  * rules. We collapse such bursts into one group so the channel shows one message
- * per incident, and so "Create case" attaches the whole burst to a single case
+ * per incident, and so a case attaches the whole burst
  *
- * Grouping key: spaceId + user.name + host.name
- * Time clustering: alerts join a cluster while within `windowMs` of the cluster's
- *   first alert. Alerts missing user.name or host.name can't be correlated, so
- *   each becomes its own singleton group
+ * PASS 1  cluster on spaceId + user.name + host.name within windowMs
+ * PASS 2  fold machine-identity clusters into the human cluster on the same host
  *
- * TWO CLOCKS, AND THEY ARE NOT INTERCHANGEABLE
+ * Two distinct human users on one host still stay separate. A shared jump box
+ * with jsmith and adoe on it is two investigations, and merging them would put
+ * one analyst's alerts in the other's case
+ *
+ * TWO CLOCKS
  *
  *   alert.timestamp        detection time (kibana.alert.@timestamp, falling back
  *                          to @timestamp). What a human means by "when did this
- *                          fire". Used for clustering and for display
- *   alert.cursorTimestamp  ingest time (@timestamp). What Elastic actually
- *                          ranges and sorts on in every query in src/elastic.js
+ *                          fire". Clustering and display use this one
+ *   alert.cursorTimestamp  ingest time (@timestamp). What Elastic ranges and
+ *                          sorts on. Only watchers/alerts.js touches it, to
+ *                          advance its poll cursor
  *
- * A group therefore carries both: `from`/`to` for the Slack message, and
- * `queryFrom`/`queryTo` for the button, which get handed straight back to
- * getRelatedAlerts. Bounding an @timestamp range with detection times silently
- * returns the wrong set of alerts whenever the two clocks drift - the case looks
- * fine and holds the wrong alerts. Keep the pairs matched
+ * Nothing here hands a timestamp back to a query any more - cases are built
+ * from an explicit alert id list - so detection time is all this file needs
  */
+
+const SEP = '\u0000';
 
 /** Detection time - clustering and display */
 function ts(a) {
@@ -36,145 +39,237 @@ function ts(a) {
   return Number.isNaN(t) ? 0 : t;
 }
 
-/**
- * Ingest time - the only thing safe to hand back to a query.
- * Falls back to the detection time for alerts that predate cursorTimestamp or
- * come from a fake client in a test
+/*
+ * ---- machine identities -------------------------------------------------
  */
-function cursorTs(a) {
-  return a.cursorTimestamp || a.timestamp;
+
+/** `NT AUTHORITY\SYSTEM` and `CORP\svc_backup` are the same names as SYSTEM and
+ *  svc_backup - strip the domain before matching */
+function bareUser(name) {
+  if (!name) return null;
+  const s = String(name).trim();
+  if (!s) return null;
+  const slash = Math.max(s.lastIndexOf('\\'), s.lastIndexOf('/'));
+  return slash >= 0 ? s.slice(slash + 1) : s;
 }
 
-/** Min and max of a comparable-ISO field across a cluster */
-function spanOf(alerts, pick) {
-  let min = null;
-  let max = null;
-  for (const a of alerts) {
-    const v = pick(a);
-    if (!v) continue;
-    if (min === null || v < min) min = v;
-    if (max === null || v > max) max = v;
-  }
-  return { min, max };
+/** Config gives globs (`svc_*`); turn them into anchored, case-insensitive REs */
+function globToRe(glob) {
+  const escaped = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  return new RegExp(`^${escaped}$`, 'i');
 }
+
+const machineMatchers = (config.grouping.machineUsers || []).map(globToRe);
+
+/**
+ * Does this identity tell us anything about *who* was at the keyboard?
+ *
+ * Absent counts as machine: an alert with no user.name can't contradict a match
+ * either, and treating it as machine is what finally gets those alerts out of
+ * the singleton bucket they used to land in
+ */
+function isMachineUser(name) {
+  const bare = bareUser(name);
+  if (!bare) return true;
+  if (bare.endsWith('$')) return true; // AD computer account, e.g. WEB-01$
+  return machineMatchers.some((re) => re.test(bare));
+}
+
+/*
+ * ---- group construction -------------------------------------------------
+ */
 
 function makeGroup(alerts) {
   const sorted = [...alerts].sort((a, b) => ts(a) - ts(b));
   const ruleCounts = {};
+  const userCounts = {};
   let topSeverity = 'unknown';
+
   for (const a of sorted) {
     const rn = a.ruleName || UNKNOWN_RULE;
     ruleCounts[rn] = (ruleCounts[rn] || 0) + 1;
     const sev = a.severity || 'unknown';
     if ((SEVERITY_RANK[sev] || 0) > (SEVERITY_RANK[topSeverity] || 0)) topSeverity = sev;
+
+    /*
+     * Counted on the bare name. `SYSTEM` and `NT AUTHORITY\SYSTEM` are one
+     * identity, and if they stay distinct here they become two entries in
+     * userNames - which is what incidents.findMatch compares across polls. The
+     * same account arriving under both spellings would then look like two
+     * different users on one host and split the incident
+     */
+    const u = bareUser(a.userName);
+    if (u) userCounts[u] = (userCounts[u] || 0) + 1;
   }
+
   const representativeRule =
     Object.entries(ruleCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || UNKNOWN_RULE;
 
-  // Taken over the whole cluster rather than off the first and last element:
-  // `sorted` is ordered by detection time, so its ends are not necessarily the
-  // ingest-time extremes
-  const cursorSpan = spanOf(sorted, cursorTs);
+  const userNames = Object.keys(userCounts);
+  const humans = userNames.filter((u) => !isMachineUser(u));
+
+  /*
+   * The name on the message. A human identity always wins the label even if
+   * SYSTEM fired more of the alerts - "12 alerts on web-01 (SYSTEM)" tells an
+   * analyst nothing, "12 alerts, jsmith on web-01" tells them more
+   */
+  const primaryUser =
+    humans.sort((a, b) => userCounts[b] - userCounts[a])[0] ||
+    userNames.sort((a, b) => userCounts[b] - userCounts[a])[0] ||
+    null;
 
   return {
     spaceId: sorted[0].spaceId,
-    userName: sorted[0].userName,
-    hostName: sorted[0].hostName,
+    hostName: sorted[0].hostName || null,
+
+    userName: primaryUser,
+    userNames,                          // every identity in the burst
+    machineOnly: humans.length === 0,   // nothing here says who was driving
+    machineUsers: userNames.filter(isMachineUser),
+
     alerts: sorted,
     count: sorted.length,
 
-    // Display (detection time)
     from: sorted[0].timestamp,
     to: sorted[sorted.length - 1].timestamp,
 
-    // Query coordinates (ingest time) - what getRelatedAlerts ranges on
-    queryFrom: cursorSpan.min,
-    queryTo: cursorSpan.max,
-
     ruleCounts,
+    userCounts,
     topSeverity,
     representativeRule,
   };
 }
 
+/** Do two clusters sit close enough in time to be one incident? */
+function overlaps(a, b, windowMs) {
+  const aFrom = Date.parse(a.from);
+  const aTo = Date.parse(a.to);
+  const bFrom = Date.parse(b.from);
+  const bTo = Date.parse(b.to);
+  return bFrom - aTo <= windowMs && aFrom - bTo <= windowMs;
+}
+
+/** Cluster one key's alerts on detection time, window measured from the first */
+function clusterByTime(list, windowMs) {
+  list.sort((a, b) => ts(a) - ts(b));
+  const clusters = [];
+  let cluster = [];
+  let clusterStart = null;
+
+  for (const a of list) {
+    const t = ts(a);
+    if (cluster.length === 0) {
+      cluster = [a];
+      clusterStart = t;
+    } else if (t - clusterStart <= windowMs) {
+      cluster.push(a);
+    } else {
+      clusters.push(cluster);
+      cluster = [a];
+      clusterStart = t;
+    }
+  }
+  if (cluster.length) clusters.push(cluster);
+  return clusters;
+}
+
+/*
+ * Pass 2. Within one space+host, absorb machine-identity clusters into the
+ * human cluster they overlap
+ *
+ * Ambiguity rule: if a machine cluster overlaps more than one human cluster we
+ * give it to the nearest in time.
+ */
+function mergeMachineClusters(clustersOnHost, windowMs) {
+  const groups = clustersOnHost.map(makeGroup);
+  const humans = groups.filter((g) => !g.machineOnly);
+  const machines = groups.filter((g) => g.machineOnly);
+
+  if (!machines.length) return groups;
+
+  // Nobody human on this host: fold every overlapping machine cluster together
+  // so a box running only service accounts still gets one message, not six
+  if (!humans.length) {
+    const out = [];
+    for (const m of machines) {
+      const target = out.find((g) => overlaps(g, m, windowMs));
+      if (target) target.alerts.push(...m.alerts);
+      else out.push(m);
+    }
+    return out.map((g) => makeGroup(g.alerts));
+  }
+
+  const absorbed = new Map(humans.map((h) => [h, [...h.alerts]]));
+  const orphans = [];
+
+  for (const m of machines) {
+    const candidates = humans.filter((h) => overlaps(h, m, windowMs));
+    if (!candidates.length) {
+      orphans.push(m);
+      continue;
+    }
+    const mid = (Date.parse(m.from) + Date.parse(m.to)) / 2;
+    const nearest = candidates.sort((x, y) => {
+      const dx = Math.abs((Date.parse(x.from) + Date.parse(x.to)) / 2 - mid);
+      const dy = Math.abs((Date.parse(y.from) + Date.parse(y.to)) / 2 - mid);
+      return dx - dy;
+    })[0];
+    absorbed.get(nearest).push(...m.alerts);
+  }
+
+  return [...[...absorbed.values()].map(makeGroup), ...orphans];
+}
+
 /**
- * Cluster alerts by space + user + host within windowMs
+ * Cluster alerts into incidents
  *
  * @param {Array} alerts   each: { id, index, spaceId, ruleName, severity, timestamp, cursorTimestamp, userName, hostName }
  * @param {number} windowMs
+ * @param {object} [opts]
+ * @param {boolean} [opts.mergeMachineUsers] pass 2 on/off (config default)
  * @returns {Array} groups (see makeGroup)
  */
-function groupAlerts(alerts, windowMs) {
+function groupAlerts(alerts, windowMs, opts = {}) {
+  const mergeMachine = opts.mergeMachineUsers ?? config.grouping.mergeMachineUsers;
+
+  // Pass 1: spaceId + user + host. An alert with no host still can't be
+  // correlated to anything, so it stays a singleton
   const byKey = new Map();
-  const singletons = [];
+  const hostless = [];
 
   for (const a of alerts) {
-    if (a.userName && a.hostName) {
-      const key = `${a.spaceId}\u0000${a.userName}\u0000${a.hostName}`;
-      if (!byKey.has(key)) byKey.set(key, []);
-      byKey.get(key).push(a);
-    } else {
-      singletons.push(a); // uncorrelatable > its own group
+    if (!a.hostName) {
+      hostless.push(a);
+      continue;
     }
+    const key = `${a.spaceId}${SEP}${a.hostName}${SEP}${a.userName || ''}`;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(a);
+  }
+
+  // Re-bucket the time clusters under their host so pass 2 can see across users
+  const byHost = new Map();
+  for (const [key, list] of byKey) {
+    const hostKey = key.slice(0, key.lastIndexOf(SEP));
+    if (!byHost.has(hostKey)) byHost.set(hostKey, []);
+    byHost.get(hostKey).push(...clusterByTime(list, windowMs));
   }
 
   const groups = [];
-  for (const list of byKey.values()) {
-    list.sort((a, b) => ts(a) - ts(b));
-    let cluster = [];
-    let clusterStart = null;
-    for (const a of list) {
-      const t = ts(a);
-      if (cluster.length === 0) {
-        cluster = [a];
-        clusterStart = t;
-      } else if (t - clusterStart <= windowMs) {
-        cluster.push(a);
-      } else {
-        groups.push(makeGroup(cluster));
-        cluster = [a];
-        clusterStart = t;
-      }
-    }
-    if (cluster.length) groups.push(makeGroup(cluster));
+  for (const clusters of byHost.values()) {
+    if (mergeMachine) groups.push(...mergeMachineClusters(clusters, windowMs));
+    else groups.push(...clusters.map(makeGroup));
   }
-  for (const a of singletons) groups.push(makeGroup([a]));
+  for (const a of hostless) groups.push(makeGroup([a]));
 
   return groups;
 }
 
-/**
- * Compact value for the "Create case" button (Slack caps value at 2000 chars)
- * For a correlatable group we store the query coordinates and re-run the search
- * on click. For an uncorrelatable singleton we just carry the alert id
+/*
+ * ---- button values ------------------------------------------------------
  *
- * f/t are the INGEST-time span, because that is the field getRelatedAlerts
- * ranges on. They are deliberately not the from/to shown in the message
+ * A button carries the incident key, as a bare string, and nothing else.
+ *
  */
-function encodeGroupValue(group) {
-  if (group.userName && group.hostName) {
-    return JSON.stringify({
-      k: 'g',
-      s: group.spaceId,
-      u: group.userName,
-      h: group.hostName,
-      f: group.queryFrom ?? group.from,
-      t: group.queryTo ?? group.to,
-    });
-  }
-  return JSON.stringify({ k: 'a', a: group.alerts[0].id });
-}
 
-/** Parse a button value */
-function decodeGroupValue(value) {
-  try {
-    const d = JSON.parse(value);
-    if (d && (d.k === 'g' || d.k === 'a')) return d;
-  } catch {
-    // Not JSON - older buttons carried a bare alert id, and so does the
-    // singleton path above
-  }
-  return { k: 'a', a: value };
-}
-
-module.exports = { groupAlerts, makeGroup, encodeGroupValue, decodeGroupValue };
+module.exports = { groupAlerts, makeGroup, isMachineUser, bareUser };

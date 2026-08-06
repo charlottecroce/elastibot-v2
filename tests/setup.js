@@ -20,3 +20,13 @@ process.env.STATS_DEFAULT_WINDOW = '7d';
 process.env.STATS_MAX_WINDOW_DAYS = '90';
 process.env.STATS_TOP_N = '10';
 process.env.STATS_NOISE_MIN_ALERTS = '10';
+
+
+process.env.GROUP_WINDOW_MS = '3600000';
+process.env.GROUP_MERGE_MACHINE_USERS = 'true';
+process.env.GROUP_MACHINE_USERS =
+  'SYSTEM,LOCAL SERVICE,NETWORK SERVICE,LOCAL SYSTEM,root,daemon,nobody,svc_*,svc-*,sa_*,_*';
+ 
+process.env.INCIDENT_IDLE_MS = '28800000';
+process.env.INCIDENT_MAX_LIFETIME_MS = '86400000';
+process.env.INCIDENT_CLAIM_TTL_MS = '60000';
