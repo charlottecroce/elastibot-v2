@@ -3,6 +3,8 @@ name: docs
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
 
 concurrency:
   group: docs-${{ github.ref }}
@@ -12,23 +14,28 @@ permissions:
   contents: write
 
 jobs:
-  build-and-deploy:
-    name: build and deploy
+  build-and-commit:
+    name: build and commit
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
-      - run: pip install -r docs/requirements.txt
+      - run: pip install mkdocs
 
-      - run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+      - run: mkdocs build
 
-      - run: mkdocs gh-deploy --force --clean
+      - run: touch docs/.nojekyll
+
+      - name: commit built docs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs
+          git diff --cached --quiet && echo "no changes" && exit 0
+          git commit -m "docs: rebuild site [skip ci]"
+          git push
