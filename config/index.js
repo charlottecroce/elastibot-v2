@@ -106,6 +106,13 @@ module.exports = {
     // Writes are never retried - creating a case twice is worse than failing once
     retries: int(process.env.ELASTIC_RETRIES, 2, 'ELASTIC_RETRIES'),
     retryBaseDelayMs: int(process.env.ELASTIC_RETRY_BASE_MS, 250, 'ELASTIC_RETRY_BASE_MS'),
+
+    // Role descriptors granted to any API key Elastibot creates automatically
+    // via /start's "create one for me" option (src/commands/start.js,
+    // src/elastic.js#provisionAnalystApiKey). Loaded from the same file an
+    // admin would otherwise paste into POST /_security/api_key by hand, so the
+    // manual and automatic paths can never drift apart
+    analystRoleDescriptors: require('../api_permissions/elastibot_analyst.json'),
   },
 
   // ---------------------------------------------------------------
@@ -155,6 +162,21 @@ module.exports = {
     // NOTE this does not apply to the incident store, which is always
     // write-through - see src/context.js for why
     stateDebounceMs: int(process.env.STATE_DEBOUNCE_MS, 0, 'STATE_DEBOUNCE_MS'),
+
+    /*
+     * Slack user IDs permitted to use /start's "create one for me" option,
+     * which has Elastibot call POST /_security/api_key itself instead of the
+     * analyst copy-pasting a key out of Kibana. Empty (the default) disables
+     * the option for EVERYONE - it has to be explicitly opted into per Slack
+     * user, because using it means pasting a credential capable of creating
+     * API keys, which is not something every analyst should be prompted for.
+     *
+     * This is Slack-side gating layered on top of, not instead of, Elastic's
+     * own enforcement: whatever admin credential someone pastes in still has
+     * to actually hold manage_api_key / manage_own_api_key, or Elasticsearch
+     * rejects the create call regardless of what this list says
+     */
+    autoProvisionSlackIds: list(process.env.AUTO_PROVISION_SLACK_IDS, ''),
   },
 
   grouping: {

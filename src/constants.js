@@ -16,6 +16,9 @@ const ACTIONS = Object.freeze({
   // so it needs a registered no-op handler or Bolt logs an unhandled action on
   // every single click
   VIEW_CASE: 'view_case',
+  // /start's radio input toggling between "paste my own key" and "create one
+  // for me" - swaps the modal's blocks via views.update
+  START_METHOD_SELECT: 'start_method_select',
 });
 
 /** Slack view callback_ids (modals) */
