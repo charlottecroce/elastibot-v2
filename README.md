@@ -1,5 +1,7 @@
 # Elastibot
 
+[![tests](https://github.com/charlottecroce/elastibot-v2/actions/workflows/tests.yml/badge.svg)](https://github.com/charlottecroce/elastibot-v2/actions/workflows/tests.yml)
+
 A Slack bot (Node.js / Bolt) that helps security analysts turn Elastic alerts into Kibana cases without leaving Slack, and pushes new alerts and cases into designated channels.
 
 ## Commands
