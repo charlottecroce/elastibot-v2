@@ -104,4 +104,3 @@ Then edit the permissions JSON in Stack Management > Security > Api Keys. The pe
   client-side, so the query needs no runtime scripts.
 - **Watchers** poll ES for new alerts and the Kibana Cases `_find` API per configured
   space, tracking last-seen timestamps in `data/state.json`.
-
