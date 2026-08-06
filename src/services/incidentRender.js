@@ -27,7 +27,6 @@ function slackErrorCode(err) {
  * @param {object} incidents   IncidentStore
  * @param {string} key         incident key
  * @param {object} [opts]
- * @param {object} [opts.pendingRuleCounts] rule breakdown for the pending set
  * @param {boolean} [opts.repostIfGone] repost when the message was deleted,
  *   instead of giving up. The watcher wants this; a button click does not -
  *   a click on a deleted message can't happen, so a 'gone' there means the
@@ -38,7 +37,13 @@ async function renderIncident(slack, incidents, key, opts = {}) {
   const rec = incidents.get(key);
   if (!rec || !rec.messageTs) return null;
 
-  const msg = incidentMessage(rec, incidents.pending(rec), opts);
+  // The pending breakdown comes off the record, not off whatever batch
+  // triggered this render - otherwise a pending alert left over from an earlier
+  // tick is missing from the count the analyst reads
+  const pending = incidents.pending(rec);
+  const msg = incidentMessage(rec, pending, {
+    pendingRuleCounts: incidents.ruleCountsFor(rec, pending),
+  });
 
   try {
     await slack.chat.update({ channel: rec.channel, ts: rec.messageTs, ...msg });

@@ -27,18 +27,6 @@ const { logger } = require('../util/logger');
 const log = logger.child({ scope: 'watcher:alerts' });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Rule breakdown for a subset of a group's alerts, for the pending section */
-function ruleCountsFor(alerts, ids) {
-  const want = new Set(ids);
-  const counts = {};
-  for (const a of alerts) {
-    if (!want.has(a.id)) continue;
-    const rn = a.ruleName || 'Unknown Rule';
-    counts[rn] = (counts[rn] || 0) + 1;
-  }
-  return counts;
-}
-
 /**
  * @param {object} deps
  * @param {object} deps.slack      Bolt web client
@@ -106,15 +94,16 @@ async function pollAlerts({ slack, state, incidents, elastic, spaces, channelFor
       continue;
     }
 
-    const spaceName = await spaces.getName(group.spaceId, elastic);
-
     // Does this burst belong to something already on the wall?
     const existing = incidents.findMatch(group);
 
     try {
       if (existing) {
+        // No space lookup here - the record already carries its display name,
+        // and on a cold cache getName is an HTTP round trip per group
         await updateIncident({ slack, incidents, existing, group, result });
       } else {
+        const spaceName = await spaces.getName(group.spaceId, elastic);
         await postIncident({ slack, incidents, group, channel, spaceName, result });
       }
       await sleep(config.watchers.postDelayMs);
@@ -177,23 +166,24 @@ async function pollAlerts({ slack, state, incidents, elastic, spaces, channelFor
 /**
  * First sighting of this incident.
  *
- * Posted in two steps on purpose. The incident key is derived from the Slack
- * message ts, and the buttons carry that key - so there is no key to put on a
- * button until Slack has told us where the message landed. Post a plain-text
- * skeleton, open the record, then fill in the blocks
+ * The record is opened before the message is posted, because the buttons carry
+ * the incident key and the key has to exist to render them.
  */
 async function postIncident({ slack, incidents, group, channel, spaceName, result }) {
-  const fallback =
-    group.count > 1
-      ? `${group.count} related alerts: ${group.representativeRule}`
-      : `New alert: ${group.representativeRule}`;
+  const rec = incidents.open({ group, channel, spaceName });
 
-  const posted = await slack.chat.postMessage({ channel, text: fallback });
+  let posted;
+  try {
+    const msg = incidentMessage(rec, incidents.pending(rec));
+    posted = await slack.chat.postMessage({ channel, ...msg });
+  } catch (err) {
+    // Leaving the record would make findMatch fold the next tick's alerts into
+    // a message that does not exist, and they would never be seen again
+    incidents.discard(rec.key);
+    throw err;
+  }
 
-  const rec = incidents.open({ group, channel, messageTs: posted.ts, spaceName });
-  const msg = incidentMessage(rec, incidents.pending(rec));
-
-  await slack.chat.update({ channel, ts: posted.ts, ...msg });
+  incidents.setMessage(rec.key, { channel, messageTs: posted.ts });
 
   result.posted += 1;
   log.info('incident posted', {
@@ -219,10 +209,7 @@ async function updateIncident({ slack, incidents, existing, group, result }) {
 
   const pending = incidents.pending(rec);
 
-  await renderIncident(slack, incidents, rec.key, {
-    pendingRuleCounts: ruleCountsFor(group.alerts, pending),
-    repostIfGone: true,
-  });
+  await renderIncident(slack, incidents, rec.key, { repostIfGone: true });
 
   result.updated += 1;
   log.info('incident updated', {

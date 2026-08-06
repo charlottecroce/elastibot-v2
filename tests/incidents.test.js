@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { IncidentStore, incidentKey } = require('../src/incidents');
+const { IncidentStore } = require('../src/incidents');
 const { makeGroup } = require('../src/grouping');
 
 /*
@@ -47,9 +47,15 @@ function store(over = {}) {
   return new IncidentStore({ filePath, idleMs: 8 * HOUR, maxLifetimeMs: 24 * HOUR, claimTtlMs: 60000, ...over });
 }
 
-/** open an incident holding the given alerts */
+/*
+ * Open an incident and complete the post, as the watcher does. Kept as one
+ * helper because a record without setMessage is a half-open state that only
+ * the failed-post test cares about
+ */
 function open(s, alerts, { channel = 'C1', messageTs = '1700000000.000100' } = {}) {
-  return s.open({ group: makeGroup(alerts), channel, messageTs, spaceName: 'Security Operations' });
+  const rec = s.open({ group: makeGroup(alerts), channel, spaceName: 'Security Operations' });
+  s.setMessage(rec.key, { channel, messageTs });
+  return s.get(rec.key);
 }
 
 describe('opening and merging', () => {
@@ -57,7 +63,6 @@ describe('opening and merging', () => {
     const s = store();
     const rec = open(s, [alert('a'), alert('b')]);
 
-    expect(rec.key).toBe(incidentKey('C1', '1700000000.000100'));
     expect(rec.channel).toBe('C1');
     expect(rec.messageTs).toBe('1700000000.000100');
     expect(rec.alertIds).toEqual(['a', 'b']);
@@ -65,13 +70,47 @@ describe('opening and merging', () => {
     expect(rec.caseId).toBeNull();
   });
 
-  test('the key survives a round trip through a Slack button value', () => {
-    // Buttons carry the key as a bare string, so it has to be plain ASCII -
-    // an earlier version packed fields with a null separator and would not have
+  test('the key is safe to put on a Slack button', () => {
     const s = store();
     const rec = open(s, [alert('a')]);
     expect(rec.key).toMatch(/^[\x20-\x7e]+$/);
-    expect(s.get(rec.key)).toBe(s.get(JSON.parse(JSON.stringify(rec.key))));
+    expect(rec.key.length).toBeLessThan(2000);
+  });
+
+  test('the key exists before the message does, so buttons can be rendered', () => {
+    // This is what lets an incident be posted in one API call instead of a
+    // skeleton followed by an update
+    const s = store();
+    const rec = s.open({ group: makeGroup([alert('a')]), channel: 'C1', spaceName: 'd' });
+
+    expect(rec.key).toBeTruthy();
+    expect(rec.messageTs).toBeNull();
+  });
+
+  test('a record with no message is inert until setMessage', () => {
+    // A failed post must not leave something findMatch will fold the next
+    // tick's alerts into - they would land on a message that does not exist
+    const s = store();
+    s.open({ group: makeGroup([alert('a')]), channel: 'C1', spaceName: 'd' });
+
+    expect(s.findMatch(makeGroup([alert('b')]))).toBeNull();
+  });
+
+  test('discard removes a record whose post failed', () => {
+    const s = store();
+    const rec = s.open({ group: makeGroup([alert('a')]), channel: 'C1', spaceName: 'd' });
+
+    s.discard(rec.key);
+
+    expect(s.get(rec.key)).toBeNull();
+  });
+
+  test('two incidents opened in the same millisecond get distinct keys', () => {
+    const s = store();
+    const a = s.open({ group: makeGroup([alert('a')]), channel: 'C1', spaceName: 'd' });
+    const b = s.open({ group: makeGroup([alert('b', { hostName: 'web-02' })]), channel: 'C1', spaceName: 'd' });
+
+    expect(a.key).not.toBe(b.key);
   });
 
   test('merging adds only the alerts that are new', () => {
@@ -112,6 +151,19 @@ describe('opening and merging', () => {
     expect(s.get(rec.key).ruleCounts).toEqual({ Malware: 2, Beaconing: 1 });
     expect(s.get(rec.key).representativeRule).toBe('Malware');
   });
+
+  test('rule counts always agree with the id list', () => {
+    // Both derive from alertRules, so a re-delivered alert can't inflate the
+    // breakdown past the number of alerts actually on the message
+    const s = store();
+    const rec = open(s, [alert('a', { ruleName: 'Malware' })]);
+
+    s.merge(rec.key, makeGroup([alert('a', { ruleName: 'Malware' }), alert('b', { ruleName: 'Malware' })]));
+
+    const got = s.get(rec.key);
+    const total = Object.values(got.ruleCounts).reduce((n, c) => n + c, 0);
+    expect(total).toBe(got.alertIds.length);
+  });
 });
 
 describe('pending alerts', () => {
@@ -135,6 +187,22 @@ describe('pending alerts', () => {
     s.recordCase(rec.key, { caseId: 'case-1', link: 'https://x', title: 'T' }, ['a', 'b']);
 
     expect(s.pending(s.get(rec.key))).toEqual(['c']);
+  });
+
+  test('the pending breakdown covers alerts from every tick, not just the last', () => {
+    // The bug this guards: the breakdown used to be built from whichever batch
+    // triggered the render, so a pending alert left over from an earlier tick
+    // was missing from the counts the analyst reads
+    const s = store();
+    const rec = open(s, [alert('a', { ruleName: 'Malware' })]);
+    s.recordCase(rec.key, { caseId: 'case-1', link: 'https://x', title: 'T' }, ['a']);
+
+    s.merge(rec.key, makeGroup([alert('b', { ruleName: 'Beaconing' })]));
+    s.merge(rec.key, makeGroup([alert('c', { ruleName: 'Malware' })]));
+
+    const got = s.get(rec.key);
+    const pending = s.pending(got);
+    expect(s.ruleCountsFor(got, pending)).toEqual({ Beaconing: 1, Malware: 1 });
   });
 
   test('recordAttached clears them', () => {

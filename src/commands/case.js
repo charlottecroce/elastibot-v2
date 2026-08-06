@@ -105,10 +105,14 @@ module.exports = function registerCase(reg) {
     async ({ action, user, reply, slackUserId, client, ctx, log }) => {
       const key = action.value;
       const claim = await withClaim(ctx.incidents, key, slackUserId, async (rec) => {
-        // Show the "creating…" state to everyone else immediately, so the
-        // window where a second analyst sees a live green button is as close to
-        // zero as Slack's API allows
-        await renderIncident(client, ctx.incidents, key);
+        /*
+         * Swap the green button for a "creating…" note on everyone else's
+         * screen. Deliberately not awaited: the claim is already held, so the
+         * duplicate is already impossible, and blocking on a Slack round trip
+         * here would only delay the case the analyst is waiting on. Purely
+         * cosmetic work does not belong on the critical path
+         */
+        renderIncident(client, ctx.incidents, key).catch(() => {});
 
         const result = await createCaseForIds(user.apiKey, rec.alertIds, {
           spaceId: rec.spaceId,
@@ -227,8 +231,6 @@ module.exports = function registerCase(reg) {
   reg.action(ACTIONS.VIEW_CASE, async () => {}, { requireUser: false });
 };
 
-/** tryClaim refuses for a reason - say which, because "nothing happened" is the
- *  bug we are fixing, not a thing to reintroduce in the failure path */
 function claimRefusal(claim) {
   if (claim.reason === 'case_exists') {
     return (

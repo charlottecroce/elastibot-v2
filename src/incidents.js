@@ -1,7 +1,9 @@
 'use strict';
 
+const { randomUUID } = require('crypto');
 const config = require('../config');
 const { JsonFileStore } = require('./store');
+const { SEVERITY_RANK } = require('./constants');
 const { logger } = require('./util/logger');
 
 const log = logger.child({ scope: 'incidents' });
@@ -43,14 +45,10 @@ const log = logger.child({ scope: 'incidents' });
  */
 
 /*
- * The key identifies the Slack message, because that is what an incident IS -
- * one message that gets rewritten.
- *
- * Space and host are NOT in the key. Matching a new burst to an existing
- * incident is findMatch's job, and it reads the record's fields
+ * Keys are generated, not derived.
  */
-function incidentKey(channel, messageTs) {
-  return `${channel}.${messageTs}`;
+function newIncidentKey() {
+  return randomUUID();
 }
 
 function toMs(iso) {
@@ -132,6 +130,7 @@ class IncidentStore extends JsonFileStore {
     let best = null;
     for (const rec of Object.values(this.data)) {
       if (rec.spaceId !== group.spaceId || rec.hostName !== wantHost) continue;
+      if (!rec.messageTs) continue; // post failed or is still in flight
       if (this._isExpired(rec, now)) continue;
 
       const known = rec.userNames || [];
@@ -157,12 +156,18 @@ class IncidentStore extends JsonFileStore {
   }
 
   /**
-   * Create a record for a message that was just posted.
+   * Create a record for an incident about to be posted.
+   *
+   * The record exists before the message does, so the caller must follow up
+   * with setMessage once Slack returns a ts - or discard() if the post failed.
+   * A record with no messageTs is inert: findMatch skips it, so a failed post
+   * can't swallow the next tick's alerts into a message that isn't there
+   *
    * @returns {object} the new record
    */
-  open({ group, channel, messageTs, spaceName }) {
+  open({ group, channel, spaceName }) {
     const nowIso = new Date().toISOString();
-    const key = incidentKey(channel, messageTs);
+    const key = newIncidentKey();
 
     const rec = {
       key,
@@ -173,20 +178,29 @@ class IncidentStore extends JsonFileStore {
       spaceName,
 
       channel,
-      messageTs,
+      messageTs: null,
 
       alertIds: group.alerts.map((a) => a.id),
       attachedIds: [],
+
+      /*
+       * id > rule name for every alert on the message.
+        *   This is the source of truth for ruleCounts and representativeRule, which
+       *    are derived from it by _recount. The two can never disagree because
+       *    there is only one source.
+       */
+      alertRules: Object.fromEntries(group.alerts.map((a) => [a.id, a.ruleName || 'Unknown Rule'])),
 
       caseId: null,
       caseLink: null,
       caseTitle: null,
       claim: null,
 
-      // Cached so a re-render costs nothing. Refreshed on every merge
-      ruleCounts: { ...group.ruleCounts },
-      topSeverity: group.topSeverity,
+      // Derived from alertRules by _recount, not stored independently
+      ruleCounts: {},
       representativeRule: group.representativeRule,
+
+      topSeverity: group.topSeverity,
       from: group.from,
       to: group.to,
 
@@ -195,8 +209,15 @@ class IncidentStore extends JsonFileStore {
     };
 
     this.data[key] = rec;
+    this._recount(rec);
     this._persist();
     return rec;
+  }
+
+  /** Drop a record whose message never made it to Slack */
+  discard(key) {
+    delete this.data[key];
+    this._persist();
   }
 
   /**
@@ -216,17 +237,11 @@ class IncidentStore extends JsonFileStore {
 
     rec.alertIds = union(rec.alertIds, incoming);
     rec.userNames = union(rec.userNames, group.userNames || []);
-
-    for (const [rule, n] of Object.entries(group.ruleCounts || {})) {
-      rec.ruleCounts[rule] = (rec.ruleCounts[rule] || 0) + n;
-    }
-    rec.representativeRule =
-      Object.entries(rec.ruleCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ||
-      rec.representativeRule;
+    for (const a of group.alerts) rec.alertRules[a.id] = a.ruleName || 'Unknown Rule';
+    this._recount(rec);
 
     // Severity only ever ratchets up - an incident that produced a critical
     // doesn't stop being critical because the next alert was low
-    const { SEVERITY_RANK } = require('./constants');
     if ((SEVERITY_RANK[group.topSeverity] || 0) > (SEVERITY_RANK[rec.topSeverity] || 0)) {
       rec.topSeverity = group.topSeverity;
     }
@@ -244,6 +259,29 @@ class IncidentStore extends JsonFileStore {
     if (!rec) return [];
     const attached = new Set(rec.attachedIds);
     return rec.alertIds.filter((id) => !attached.has(id));
+  }
+
+  /**
+   * Rule breakdown over a subset of a record's alerts. Pass no ids for the
+   * whole incident, or the pending ids for the "N new alerts" section
+   */
+  ruleCountsFor(rec, ids) {
+    const counts = {};
+    for (const id of ids || rec.alertIds) {
+      const rule = rec.alertRules?.[id];
+      if (!rule) continue;
+      counts[rule] = (counts[rule] || 0) + 1;
+    }
+    return counts;
+  }
+
+  /** Recompute the cached breakdown from alertRules. Cheap, and the two can
+   *  never disagree because there is only one source */
+  _recount(rec) {
+    rec.ruleCounts = this.ruleCountsFor(rec);
+    rec.representativeRule =
+      Object.entries(rec.ruleCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ||
+      rec.representativeRule;
   }
 
   /*
@@ -365,4 +403,4 @@ class IncidentStore extends JsonFileStore {
   }
 }
 
-module.exports = { IncidentStore, incidentKey };
+module.exports = { IncidentStore, newIncidentKey };

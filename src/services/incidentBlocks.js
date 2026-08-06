@@ -14,10 +14,6 @@ const { ACTIONS, UNKNOWN_RULE } = require('../constants');
  * and as the case is made, so an analyst reading a two-hour-old message in the
  * channel sees current state, not state at post time
  *
- * ON THE COLOR
- * Slack has exactly three button styles: `primary` (green), `danger` (red) and
- * default (grey). `danger` is the only one that stands out against the grey
- * "View case" sitting next to it, so state 3 uses that
  */
 
 /** Slack mrkdwn escaping */
@@ -78,7 +74,7 @@ function viewCaseButton(rec) {
 function addAlertsButton(rec, pendingCount) {
   return {
     type: 'button',
-    style: 'danger',
+    style: 'primary',
     text: {
       type: 'plain_text',
       text: `Add ${pendingCount} new alert${pendingCount === 1 ? '' : 's'} to case`,
