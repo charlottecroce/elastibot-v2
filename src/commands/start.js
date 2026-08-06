@@ -2,7 +2,12 @@
 
 const config = require('../../config');
 const { invalidateClient, provisionAnalystApiKey } = require('../elastic');
-const { describeAxiosError } = require('../util/errors');
+const {
+  startModalView,
+  provisioningErrorMessage,
+  safeDm,
+  parseKibanaUsername,
+} = require('../services/startService');
 const { VIEWS, COMMANDS, ACTIONS } = require('../constants');
 
 /*
@@ -29,174 +34,8 @@ const { VIEWS, COMMANDS, ACTIONS } = require('../constants');
  * round trip to Elastic, which can run past Slack's ~3s view-submission ack
  * window, so that path acks immediately and reports success/failure by DM
  * instead of via response_action
+ * 
  */
-
-function methodOption(value) {
-  return {
-    text: {
-      type: 'plain_text',
-      text:
-        value === 'auto'
-          ? 'Create one for me (admin approval needed)'
-          : "I'll paste my own key",
-    },
-    value,
-  };
-}
-
-/**
- * @param {string} kibanaUsername
- * @param {object} [opts]
- * @param {'manual'|'auto'} [opts.method]
- * @param {boolean} [opts.canAutoProvision] whether this Slack user is allowed
- *   to see/use the "create one for me" option at all
- */
-function startModalView(kibanaUsername, { method = 'manual', canAutoProvision = false } = {}) {
-  const effectiveMethod = method === 'auto' && canAutoProvision ? 'auto' : 'manual';
-
-  const blocks = [
-    {
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text:
-          'To create cases *under your own username*, Elastibot needs a personal ' +
-          'Elastic API key.',
-      },
-    },
-  ];
-
-  if (canAutoProvision) {
-    blocks.push({
-      type: 'input',
-      block_id: 'method_block',
-      dispatch_action: true,
-      label: { type: 'plain_text', text: 'How do you want to connect?' },
-      element: {
-        type: 'radio_buttons',
-        action_id: 'method_select',
-        initial_option: methodOption(effectiveMethod),
-        options: [methodOption('manual'), methodOption('auto')],
-      },
-    });
-  }
-
-  if (effectiveMethod === 'auto') {
-    blocks.push(
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text:
-            'Elastibot can create a narrowly-scoped API key for you automatically. This needs ' +
-            "*an admin's* Elastic credential with permission to create API keys " +
-            '(`manage_api_key` or `manage_own_api_key`) - paste it below.\n\n' +
-            'It is used *once*, to create your key, and is never stored or logged. ' +
-            "The key handed to you is always limited to Elastibot's analyst role " +
-            '(read alerts, manage cases), regardless of what the admin credential itself can do.',
-        },
-      },
-      { type: 'divider' },
-      {
-        type: 'input',
-        block_id: 'admin_key_block',
-        label: { type: 'plain_text', text: "Admin's Elastic API key" },
-        element: {
-          type: 'plain_text_input',
-          action_id: 'admin_key_input',
-          placeholder: { type: 'plain_text', text: 'e.g. VnVhQ2ZHY0JDZGJrU29tZUFwaUtleVZhbHVl' },
-        },
-      }
-    );
-  } else {
-    blocks.push(
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text:
-            '*1.* In Kibana open *Stack Management > API keys* ' +
-            '(or *Security > API keys*).\n' +
-            '*2.* Click *Create API key*. Name it e.g. `elastibot-' +
-            (kibanaUsername || 'you') +
-            '`.\n' +
-            '*3.* Give it only the privileges you need (read alerts + manage cases).\n' +
-            '*4.* Copy the *Encoded* value (a single base64 string).\n' +
-            '_Dev Tools alternative:_ `POST /_security/api_key` > copy the `encoded` field.',
-        },
-      },
-      { type: 'divider' },
-      {
-        type: 'input',
-        block_id: 'apikey_block',
-        label: { type: 'plain_text', text: 'Encoded Elastic API key' },
-        element: {
-          type: 'plain_text_input',
-          action_id: 'apikey_input',
-          placeholder: { type: 'plain_text', text: 'e.g. VnVhQ2ZHY0JDZGJrU29tZUFwaUtleVZhbHVl' },
-        },
-      }
-    );
-  }
-
-  blocks.push({
-    // This is the moment the analyst decides whether to trust us with the
-    // key, so the claim has to match how the bot is actually configured
-    type: 'context',
-    elements: [
-      {
-        type: 'mrkdwn',
-        text: config.security.encryptionKey
-          ? ':lock: Your key is stored encrypted at rest and never posted in a channel.'
-          : ':warning: `ELASTIBOT_SECRET_KEY` is not set on this bot, so your key will ' +
-            'be stored *unencrypted* on the bot host. It is never posted in a channel.',
-      },
-    ],
-  });
-
-  return {
-    type: 'modal',
-    callback_id: VIEWS.START_SUBMIT,
-    // carry the typed username through to the submission/method-switch handlers
-    private_metadata: JSON.stringify({ kibanaUsername }),
-    title: { type: 'plain_text', text: 'Connect to Elastic' },
-    submit: { type: 'plain_text', text: effectiveMethod === 'auto' ? 'Create key' : 'Save key' },
-    close: { type: 'plain_text', text: 'Cancel' },
-    blocks,
-  };
-}
-
-/** A friendlier message than the generic axios translation for 401/403 here -
- *  the credential that failed is an admin's, not the analyst's own */
-function provisioningErrorMessage(err) {
-  const status = err?.response?.status;
-  if (status === 401 || status === 403) {
-    return (
-      `that admin credential doesn't have permission to create API keys (status ${status}). ` +
-      'It needs the `manage_api_key` (or `manage_own_api_key`) cluster privilege in Elasticsearch.'
-    );
-  }
-  return describeAxiosError(err, 'Creating your API key').message;
-}
-
-/** Best-effort private DM. A failure here is logged, never thrown - the modal
- *  has already closed by the time this runs on the automatic path */
-async function safeDm(client, slackUserId, text, log) {
-  try {
-    await client.chat.postMessage({ channel: slackUserId, text });
-  } catch (err) {
-    log.debug('confirmation DM not delivered', { err });
-  }
-}
-
-function parseKibanaUsername(privateMetadata, log) {
-  try {
-    return JSON.parse(privateMetadata || '{}').kibanaUsername || '';
-  } catch (err) {
-    log.warn('malformed modal metadata', { err });
-    return '';
-  }
-}
 
 module.exports = function registerStart(reg) {
   reg.command(
@@ -243,9 +82,10 @@ module.exports = function registerStart(reg) {
   reg.view(VIEWS.START_SUBMIT, async ({ ack, view, client, ctx, slackUserId, log }) => {
     // Slack omits state.values entries for blocks it considers empty
     const values = view?.state?.values || {};
-    const method = values.method_block?.method_select?.selected_option?.value === 'auto'
-      ? 'auto'
-      : 'manual';
+    const method =
+      values.method_block?.[ACTIONS.START_METHOD_SELECT]?.selected_option?.value === 'auto'
+        ? 'auto'
+        : 'manual';
     const kibanaUsername = parseKibanaUsername(view.private_metadata, log);
 
     if (method === 'auto') {

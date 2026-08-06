@@ -7,6 +7,7 @@ const {
 } = require('../services/caseService');
 const { caseCreatedBlocks, alertAddedBlocks } = require('../services/format');
 const { renderIncident } = require('../services/incidentRender');
+const { withClaim, claimRefusal } = require('../services/incidentClaim');
 const { ACTIONS, COMMANDS } = require('../constants');
 
 /*
@@ -34,21 +35,6 @@ const { ACTIONS, COMMANDS } = require('../constants');
  * click loses instantly and gets told who is already on it. The button swap
  * then stops anyone reaching the click at all a second later
  */
-
-/** The claim must be released on every path out, or the incident is wedged for
- *  claimTtlMs. Elastic failures are common enough that this matters */
-async function withClaim(incidents, key, slackUserId, fn, opts = {}) {
-  const claim = incidents.tryClaim(key, slackUserId, opts);
-
-  if (!claim.ok) return claim;
-
-  try {
-    return { ok: true, value: await fn(claim.rec), rec: claim.rec };
-  } catch (err) {
-    incidents.releaseClaim(key);
-    throw err;
-  }
-}
 
 module.exports = function registerCase(reg) {
   reg.command(
@@ -230,16 +216,3 @@ module.exports = function registerCase(reg) {
    */
   reg.action(ACTIONS.VIEW_CASE, async () => {}, { requireUser: false });
 };
-
-function claimRefusal(claim) {
-  if (claim.reason === 'case_exists') {
-    return (
-      `A case already exists for this incident: <${claim.rec.caseLink}|${claim.rec.caseId}>. ` +
-      'The message has been refreshed — use *Add new alerts to case* if some alerts still need attaching.'
-    );
-  }
-  if (claim.reason === 'claimed') {
-    return `<@${claim.rec.claim.by}> is creating a case for this incident right now — give it a second.`;
-  }
-  return 'That incident is no longer tracked. Use `/case <alertID>` for the alert IDs on the message.';
-}
