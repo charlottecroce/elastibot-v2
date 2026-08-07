@@ -139,7 +139,6 @@ function validateConfig(config, { throwOnError = true } = {}) {
       `ELASTIBOT_SECRET_KEY is only ${config.security.encryptionKey.length} chars - use 32 or more`
     );
   }
-  nonNegativeInt(config.security.stateDebounceMs, 'STATE_DEBOUNCE_MS');
 
   // --- Caching ---
   positiveInt(config.cache.spaceNameTtlMs, 'SPACE_NAME_TTL_MS');
@@ -162,7 +161,13 @@ function validateConfig(config, { throwOnError = true } = {}) {
     nonNegativeInt(config.watchers.postDelayMs, 'WATCH_POST_DELAY_MS');
     positiveInt(config.watchers.cases.perPage, 'WATCH_CASES_PER_PAGE');
 
-    if (!(config.watchers.jitterRatio >= 0 && config.watchers.jitterRatio < 1)) {
+    if (
+      !(
+        Number.isFinite(config.watchers.jitterRatio) &&
+        config.watchers.jitterRatio >= 0 &&
+        config.watchers.jitterRatio < 1
+      )
+    ) {
       errors.push(
         'WATCH_JITTER_RATIO must be between 0 and 1 (exclusive), got ' +
           JSON.stringify(config.watchers.jitterRatio)

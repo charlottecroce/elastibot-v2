@@ -5,12 +5,19 @@ const { createElasticClient } = require('../elastic');
 const { buildCaseTitle, monthYearTag } = require('../naming');
 const { caseUrl } = require('./kibanaLinks');
 const { getSpaceName } = require('./spaceService');
+const { attachInRuleBatches } = require('./attachAlerts');
 const { ALERT_STATUS_FOR_CASE, DEFAULT_SPACE, UNKNOWN_RULE } = require('../constants');
 const { UserFacingError, describeAxiosError } = require('../util/errors');
 const { logger } = require('../util/logger');
 
 /*
  * Case creation and alert attachment. Error types come from util/errors
+ *
+ * The per-rule attach loop (group alerts by rule, POST one comment per rule,
+ * collect failures into a readable warning) lives in services/attachAlerts.js
+ * now, not here. It used to be copy-pasted between createCaseFromAlerts and
+ * attachAlertsToCase and the two copies had already drifted - see that file's
+ * header for the details
  */
 
 const log = logger.child({ scope: 'service:case' });
@@ -135,52 +142,31 @@ async function createCaseFromAlerts(client, alerts) {
   }
   const caseId = created.id;
 
-  // Attach alerts in per-rule batches
-  const byRule = new Map();
-  for (const a of alerts) {
-    const key = a.ruleId || a.ruleName || 'unknown';
-    if (!byRule.has(key)) byRule.set(key, []);
-    byRule.get(key).push(a);
-  }
+  // Attach alerts in per-rule batches. `owner` is forced across every batch -
+  // case creation picks one owner for the whole case, unlike attaching to an
+  // existing case where each alert keeps its own
+  const { attachedIds, warning } = await attachInRuleBatches(client, {
+    spaceId,
+    caseId,
+    alerts,
+    owner,
+  });
 
-  let attached = 0;
-  // Which ids actually made it onto the case, not just how many. The incident
-  // store needs the exact ids (recordCase / recordAttached), not a count - a
-  // count alone can't tell "pending" apart from "attached"
-  const attachedIds = [];
-  const failures = [];
-  for (const list of byRule.values()) {
-    try {
-      await client.attachAlert(spaceId, caseId, {
-        type: 'alert',
-        alertId: list.map((a) => a.id),
-        index: list.map((a) => a.index),
-        rule: { id: list[0].ruleId, name: list[0].ruleName },
-        owner,
-      });
-      attached += list.length;
-      attachedIds.push(...list.map((a) => a.id));
-    } catch (err) {
-      failures.push(
-        `${list[0].ruleName} ×${list.length} (${describeAxiosError(err, 'attach').message})`
-      );
-    }
-  }
-
-  if (attached === 0) {
+  if (attachedIds.length === 0) {
+    const reason = warning ? warning.replace(/^Some alerts didn't attach: /, '') : 'unknown error';
     throw new UserFacingError(
-      `Case *${title}* (\`${caseId}\`) was created, but attaching alerts failed: ${failures.join('; ')}`
+      `Case *${title}* (\`${caseId}\`) was created, but attaching alerts failed: ${reason}`
     );
   }
 
   // Partial failures are reported to the analyst in the Slack message, and
   // logged here so there's a record after that message scrolls away
-  if (failures.length) {
+  if (warning) {
     log.warn('some alerts did not attach', {
       caseId,
       spaceId,
-      attached,
-      failed: alerts.length - attached,
+      attached: attachedIds.length,
+      failed: alerts.length - attachedIds.length,
     });
   }
 
@@ -195,9 +181,9 @@ async function createCaseFromAlerts(client, alerts) {
     ruleName: representativeRule,
     ruleCounts,
     alertCount: alerts.length,
-    attachedCount: attached,
+    attachedCount: attachedIds.length,
     attachedIds,
-    warning: failures.length ? `Some alerts didn't attach: ${failures.join('; ')}` : null,
+    warning,
     link: caseUrl(spaceId, caseId, owner),
   };
 }
@@ -313,6 +299,11 @@ async function createCaseForIds(apiKey, alertIds, { spaceId } = {}) {
  * case" button on a posted incident - the case already exists by this point,
  * so there is no title/owner logic here, only the attach step
  *
+ * Unlike createCaseFromAlerts, no owner override is passed to
+ * attachInRuleBatches: the case's owner was already fixed at creation time, so
+ * each batch just takes its own alert's owner (falling back to the configured
+ * default), same as before this was pulled into the shared helper
+ *
  * @param {string} apiKey
  * @param {object} opts
  * @param {string} opts.spaceId
@@ -335,33 +326,9 @@ async function attachAlertsToCase(apiKey, { spaceId, caseId, alertIds }) {
     };
   }
 
-  const byRule = new Map();
-  for (const a of alerts) {
-    const key = a.ruleId || a.ruleName || 'unknown';
-    if (!byRule.has(key)) byRule.set(key, []);
-    byRule.get(key).push(a);
-  }
+  const { attachedIds, warning } = await attachInRuleBatches(client, { spaceId, caseId, alerts });
 
-  const attachedIds = [];
-  const failures = [];
-  for (const list of byRule.values()) {
-    try {
-      await client.attachAlert(spaceId, caseId, {
-        type: 'alert',
-        alertId: list.map((a) => a.id),
-        index: list.map((a) => a.index),
-        rule: { id: list[0].ruleId, name: list[0].ruleName },
-        owner: list[0].owner || config.elastic.defaultOwner,
-      });
-      attachedIds.push(...list.map((a) => a.id));
-    } catch (err) {
-      failures.push(
-        `${list[0].ruleName} ×${list.length} (${describeAxiosError(err, 'attach').message})`
-      );
-    }
-  }
-
-  if (failures.length) {
+  if (warning) {
     log.warn('some alerts did not attach to an existing case', {
       caseId,
       spaceId,
@@ -370,11 +337,7 @@ async function attachAlertsToCase(apiKey, { spaceId, caseId, alertIds }) {
     });
   }
 
-  return {
-    caseId,
-    attachedIds,
-    warning: failures.length ? `Some alerts didn't attach: ${failures.join('; ')}` : null,
-  };
+  return { caseId, attachedIds, warning };
 }
 
 /**
@@ -383,6 +346,11 @@ async function attachAlertsToCase(apiKey, { spaceId, caseId, alertIds }) {
  * We read the case first for its status: Kibana only pushes status to alerts on a
  * case status *change*, so an alert joining an already in-progress/closed case
  * would otherwise stay open. We set it to match once, then syncing takes over
+ *
+ * This is a single-alert attach, not a batch, so it does NOT go through
+ * attachInRuleBatches (which always posts alertId/index as arrays). Its
+ * request body is the scalar shape Kibana's comments API also accepts for one
+ * alert, and callers/tests depend on that exact shape
  *
  * @returns {Promise<{caseId,alertId,ruleName,link}>}
  */

@@ -8,9 +8,10 @@ const { caseLinkForIncident } = require('./kibanaLinks');
  * The incident message, in its three states.
  *
  *   1. NO CASE          green "Create case"
- *   2. CASE, SETTLED    plain "View case" - every alert shown is on the case
- *   3. CASE, PENDING    plain "View case" + green "Add N new alerts to case",
- *                       plus a section listing what isn't on the case yet
+ *   2. CASE, SETTLED    no buttons - the case summary line links the case
+ *   3. CASE, PENDING    green "Add N new alerts to case", plus a section
+ *                       listing what isn't on the case yet as ready-to-run
+ *                       /add_alert commands
  *
  * The same message is re-rendered in place with chat.update as alerts arrive
  * and as the case is made, so an analyst reading a two-hour-old message in the
@@ -21,6 +22,16 @@ const { caseLinkForIncident } = require('./kibanaLinks');
 /** Past this many, the pending id list is noise rather than something to
  *  reconcile by hand */
 const MAX_PENDING_IDS_SHOWN = 10;
+
+/*
+ * Fence-safe text. Inside a ``` block Slack does NOT interpret mrkdwn, so this
+ * takes no esc() - same convention as format.js#plain. A stray backtick would
+ * close the fence early and spill the remaining commands into the message as
+ * prose, so it gets stripped
+ */
+function fenceSafe(s) {
+  return String(s ?? '').replace(/[`\r\n]+/g, '');
+}
 
 /** "`jsmith` (+SYSTEM, svc_backup)" - the machine identities folded in by
  *  grouping.js are shown, not hidden, or the merge looks like a bug */
@@ -46,40 +57,6 @@ function createCaseButton(rec, alertCount) {
   };
 }
 
-/**
- * A link button, not an action. It opens Kibana directly instead of round
- * tripping through the bot, so it works for anyone in the channel whether or
- * not they have run /start.
- *
- * WHY THIS TAKES caseLink AS AN ARGUMENT INSTEAD OF READING rec.caseLink:
- * a Slack button whose `url` is undefined - or is anything other than an
- * absolute http(s) URL - is not rejected. Slack drops the field, renders the
- * button, and clicking it does nothing, with no error on either side. So the
- * url is resolved by the caller through caseLinkForIncident (which derives it
- * from spaceId + caseId when the stored copy is missing or unusable) and this
- * returns null rather than ever emitting a button that can't be clicked.
- *
- * Slack still delivers an interaction event for url buttons, so the action_id
- * needs a registered no-op ack or Bolt logs an unhandled action on every single
- * click - see commands/case.js
- *
- * @param {object} rec
- * @param {string|null} caseLink absolute http(s) url from caseLinkForIncident
- * @returns {object|null} the button, or null if there is no link to give it
- */
-function viewCaseButton(rec, caseLink) {
-  if (!caseLink) return null;
-  return {
-    type: 'button',
-    text: { type: 'plain_text', text: 'View case', emoji: true },
-    url: caseLink,
-    action_id: ACTIONS.VIEW_CASE,
-    // Deliberately no `value`: a link button carries no state, the no-op
-    // handler never reads one, and rec.caseId is already in the url
-    accessibility_label: `Open case ${rec.caseTitle || rec.caseId} in Kibana`,
-  };
-}
-
 function addAlertsButton(rec, pendingCount) {
   return {
     type: 'button',
@@ -94,7 +71,13 @@ function addAlertsButton(rec, pendingCount) {
   };
 }
 
-/** The context line naming the case and how much of the incident is on it */
+/**
+ * The context line naming the case and how much of the incident is on it.
+ *
+ *
+ * mrkdwnLink degrades to the bare title when there is no usable link, rather
+ * than rendering the literal text "<undefined|SO-073026-Malware>"
+ */
 function caseSummaryBlock(rec, caseLink, totalCount) {
   const onCase = (rec.attachedIds || []).length;
   return {
@@ -110,15 +93,35 @@ function caseSummaryBlock(rec, caseLink, totalCount) {
   };
 }
 
-/** The "N new alerts since the case was created" section plus its id list */
-function pendingBlocks(pendingIds, pendingRuleCounts) {
+/**
+ * The "N new alerts since the case was created" section plus the commands that
+ * attach them by hand.
+ *
+ * Whole commands, not bare ids. The button is the happy path; this block is
+ * what gets used when the button fails, and hand-assembling
+ * `/add_alert <caseID> <alertID>` around a UUID at 3am is how the wrong alert
+ * ends up on the case. Slack puts a copy affordance on a fenced block and
+ * leaves its contents unformatted, so the whole list survives a paste.
+ *
+ * A `section` and not a `context`: context text renders small and grey, and on
+ * mobile it wraps mid-id. Slack caps a section's text at 3000 chars - ten
+ * UUID-length commands is roughly 500, so MAX_PENDING_IDS_SHOWN keeps this well
+ * clear without needing a length check here
+ *
+ * @param {object} rec            incident record - needed for caseId
+ * @param {string[]} pendingIds
+ * @param {object} [pendingRuleCounts]
+ */
+function pendingBlocks(rec, pendingIds, pendingRuleCounts) {
   const pendingCount = pendingIds.length;
   const breakdown = pendingRuleCounts ? `\n${ruleBreakdown(pendingRuleCounts)}` : '';
 
   const shown = pendingIds.slice(0, MAX_PENDING_IDS_SHOWN);
   const more = pendingCount - shown.length;
 
-  return [
+  const commands = shown.map((id) => `/add_alert ${fenceSafe(rec.caseId)} ${fenceSafe(id)}`);
+
+  const blocks = [
     { type: 'divider' },
     {
       type: 'section',
@@ -130,16 +133,19 @@ function pendingBlocks(pendingIds, pendingRuleCounts) {
       },
     },
     {
-      // Ids are what an analyst needs to reconcile by hand if the button fails
-      type: 'context',
-      elements: [
-        {
-          type: 'mrkdwn',
-          text: shown.map(code).join(' ') + (more > 0 ? ` _+${more} more_` : ''),
-        },
-      ],
+      type: 'section',
+      text: { type: 'mrkdwn', text: `\`\`\`\n${commands.join('\n')}\n\`\`\`` },
     },
   ];
+
+  if (more > 0) {
+    blocks.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: `_+${more} more not listed — use the button_` }],
+    });
+  }
+
+  return blocks;
 }
 
 /**
@@ -158,8 +164,6 @@ function incidentMessage(rec, pendingIds = [], opts = {}) {
   const isBurst = count > 1;
 
   const hasCase = Boolean(rec.caseId);
-  // Resolved once and threaded through, so the button and the summary line can
-  // never disagree about whether there is a link
   const caseLink = caseLinkForIncident(rec);
 
   const pendingCount = pendingIds.length;
@@ -209,21 +213,16 @@ function incidentMessage(rec, pendingIds = [], opts = {}) {
    * opening a second case: the message says out loud that a case exists, which
    * alerts are on it, and which aren't yet
    */
-  if (showPending) blocks.push(...pendingBlocks(pendingIds, opts.pendingRuleCounts));
+  if (showPending) blocks.push(...pendingBlocks(rec, pendingIds, opts.pendingRuleCounts));
 
   /*
-   * Actions. Order follows the spec: the case first, then what to do about the
-   * alerts that aren't on it.
+   * Actions. create the case, or attach what isn't on
+   * it yet. A settled incident gets no actions block at all, which is the right
+   * shape: there is nothing left to do to it from Slack.
    *
-   * Built as a list and only appended if non-empty. Slack rejects an actions
-   * block with `elements: []`, and that rejection fails the whole chat.update -
-   * so a record with a case but no reachable link would take the entire message
-   * down with it rather than just losing one button
    */
   const elements = [];
   if (hasCase) {
-    const view = viewCaseButton(rec, caseLink);
-    if (view) elements.push(view);
     if (showPending) elements.push(addAlertsButton(rec, pendingCount));
   } else {
     elements.push(createCaseButton(rec, count));
@@ -255,7 +254,6 @@ function incidentMessage(rec, pendingIds = [], opts = {}) {
 module.exports = {
   incidentMessage,
   identityLine,
-  viewCaseButton,
   MAX_PENDING_IDS_SHOWN,
   // Re-exported for the modules that already imported it from here
   ruleBreakdown,

@@ -150,18 +150,18 @@ module.exports = {
     // If unset, keys are stored in plaintext and a warning is logged at startup
     encryptionKey: process.env.ELASTIBOT_SECRET_KEY,
 
-    // Local persistence (gitignored)
+    /*
+     * Local persistence (gitignored). Every store here is write-through: the
+     * alert cursor, the user keys and the incident records are all read back
+     * after a restart, and anything that copies data/ out from under a live
+     * process captures whatever was last written, not whatever is in memory
+     */
     userStorePath: process.env.USER_STORE_PATH || './data/users.json',
     statePath: process.env.STATE_PATH || './data/state.json',
     // Posted incidents: message coordinates, which alerts are on which case,
     // and the create-case claim. Holds no credentials, but losing it means
     // every open incident forgets its case and offers a green button again
     incidentStorePath: process.env.INCIDENT_STORE_PATH || './data/incidents.json',
-    // 0 = write through on every change. Raise it to batch cursor writes; the
-    // store is flushed on shutdown either way.
-    // NOTE this does not apply to the incident store, which is always
-    // write-through - see src/context.js for why
-    stateDebounceMs: int(process.env.STATE_DEBOUNCE_MS, 0, 'STATE_DEBOUNCE_MS'),
 
     /*
      * Slack user IDs permitted to use /start's "create one for me" option,
