@@ -1,6 +1,10 @@
 'use strict';
 
-const { incidentMessage, identityLine, MAX_PENDING_IDS_SHOWN } = require('../src/services/incidentBlocks');
+const {
+  incidentMessage,
+  identityLine,
+  MAX_PENDING_IDS_SHOWN,
+} = require('../src/services/incidentBlocks');
 const { ACTIONS } = require('../src/constants');
 
 /*
@@ -57,6 +61,20 @@ const actionsOf = (blocks) => blocks.find((b) => b.type === 'actions');
 const buttonWith = (blocks, actionId) =>
   (actionsOf(blocks)?.elements || []).find((e) => e.action_id === actionId);
 
+/** The :open_file_folder: context line, which is the only route to the case */
+const summaryTextOf = (blocks) =>
+  blocks
+    .flatMap((b) => b.elements || [])
+    .map((e) => e.text)
+    .find((t) => typeof t === 'string' && t.includes(':open_file_folder:'));
+
+/** Every fenced block on the message, joined */
+const fencesOf = (blocks) =>
+  blocks
+    .map((b) => b.text?.text)
+    .filter((t) => typeof t === 'string' && t.includes('```'))
+    .join('\n');
+
 describe('state 1: no case yet', () => {
   test('offers Create case and nothing else', () => {
     const { blocks } = incidentMessage(rec(), ['a1']);
@@ -82,16 +100,19 @@ describe('state 1: no case yet', () => {
     const { blocks } = incidentMessage(rec(), ['a1']);
     expect(JSON.stringify(blocks)).not.toContain(':open_file_folder:');
   });
+
+  test('no case means no /add_alert commands - there is no case to add to', () => {
+    const { blocks } = incidentMessage(rec(), ['a1']);
+    expect(JSON.stringify(blocks)).not.toContain('/add_alert');
+  });
 });
 
 describe('state 2: case exists, everything attached', () => {
-  test('offers View case only', () => {
+  test('there is nothing left to do, so there is no actions block', () => {
+    // Slack rejects `elements: []` outright, so "no buttons" has to mean the
+    // whole block is absent rather than an empty one
     const { blocks } = incidentMessage(withCase(), []);
-    const elements = actionsOf(blocks).elements;
-
-    expect(elements).toHaveLength(1);
-    expect(elements[0].action_id).toBe(ACTIONS.VIEW_CASE);
-    expect(elements[0].text.text).toBe('View case');
+    expect(actionsOf(blocks)).toBeUndefined();
   });
 
   test('the case summary line links the case title', () => {
@@ -118,16 +139,14 @@ describe('state 3: case exists with pending alerts', () => {
     to: T1,
   });
 
-  test('offers View case and Add alerts, in that order', () => {
+  test('offers Add alerts and nothing else', () => {
     const { blocks } = incidentMessage(pending, ['a2', 'a3']);
     const elements = actionsOf(blocks).elements;
 
-    expect(elements.map((e) => e.action_id)).toEqual([
-      ACTIONS.VIEW_CASE,
-      ACTIONS.ADD_ALERTS_TO_CASE,
-    ]);
-    expect(elements[1].text.text).toBe('Add 2 new alerts to case');
-    expect(elements[1].value).toBe('incident-key-1');
+    expect(elements).toHaveLength(1);
+    expect(elements[0].action_id).toBe(ACTIONS.ADD_ALERTS_TO_CASE);
+    expect(elements[0].text.text).toBe('Add 2 new alerts to case');
+    expect(elements[0].value).toBe('incident-key-1');
   });
 
   test('one pending alert is singular', () => {
@@ -138,11 +157,36 @@ describe('state 3: case exists with pending alerts', () => {
     expect(JSON.stringify(blocks)).toContain('1 new alert since the case was created');
   });
 
-  test('the pending ids are listed so they can be reconciled by hand', () => {
+  /*
+   * The pending list is what gets used when the button fails, so it carries
+   * whole commands rather than bare ids - assembling
+   * `/add_alert <caseID> <alertID>` by hand around a UUID is how the wrong
+   * alert ends up on the case
+   */
+  test('the pending ids come out as runnable commands, not bare ids', () => {
     const { blocks } = incidentMessage(pending, ['a2', 'a3']);
-    const text = JSON.stringify(blocks);
-    expect(text).toContain('`a2`');
-    expect(text).toContain('`a3`');
+    const fence = fencesOf(blocks);
+
+    expect(fence).toContain('/add_alert case-1 a2');
+    expect(fence).toContain('/add_alert case-1 a3');
+  });
+
+  test('the commands sit in a fence, so a copy gets the commands and nothing else', () => {
+    const { blocks } = incidentMessage(pending, ['a2', 'a3']);
+    const fenced = blocks.find((b) => b.text?.text?.startsWith('```'));
+
+    expect(fenced).toBeDefined();
+    expect(fenced.type).toBe('section'); // context renders small and wraps mid-id
+    expect(fenced.text.text).toBe('```\n/add_alert case-1 a2\n/add_alert case-1 a3\n```');
+  });
+
+  test('a backtick in an id cannot close the fence early', () => {
+    const { blocks } = incidentMessage(pending, ['a2`whoami`']);
+    const fenced = blocks.find((b) => b.text?.text?.startsWith('```'));
+
+    // Three at the front, three at the back, none in the middle
+    expect(fenced.text.text.match(/```/g)).toHaveLength(2);
+    expect(fenced.text.text).toContain('/add_alert case-1 a2whoami');
   });
 
   test('a long pending list is capped and says how many are hidden', () => {
@@ -150,9 +194,18 @@ describe('state 3: case exists with pending alerts', () => {
     const { blocks } = incidentMessage(pending, ids);
     const text = JSON.stringify(blocks);
 
-    expect(text).toContain(`\`p${MAX_PENDING_IDS_SHOWN - 1}\``);
-    expect(text).not.toContain(`\`p${MAX_PENDING_IDS_SHOWN}\``);
+    expect(text).toContain(`/add_alert case-1 p${MAX_PENDING_IDS_SHOWN - 1}`);
+    expect(text).not.toContain(`/add_alert case-1 p${MAX_PENDING_IDS_SHOWN}`);
     expect(text).toContain('+4 more');
+  });
+
+  test('the fence stays inside the 3000 char cap Slack puts on a section', () => {
+    // Real ids are UUID-length; MAX_PENDING_IDS_SHOWN is what keeps this true
+    const ids = Array.from({ length: MAX_PENDING_IDS_SHOWN }, () => 'f'.repeat(40));
+    const { blocks } = incidentMessage(pending, ids);
+    const fenced = blocks.find((b) => b.text?.text?.startsWith('```'));
+
+    expect(fenced.text.text.length).toBeLessThanOrEqual(3000);
   });
 
   test('the pending breakdown is rendered when supplied', () => {
@@ -164,17 +217,18 @@ describe('state 3: case exists with pending alerts', () => {
 });
 
 /*
- * The regression this suite exists for. rec.caseLink is a denormalised copy;
- * these are the ways it goes missing, and in every one of them the button used
- * to render with url: undefined - clickable, and inert
+ * There is no "View case" button any more - see services/incidentBlocks.js for
+ * why. The case summary line is now the only route from the message to the
+ * case, so what used to be asserted about the button's url is asserted about
+ * that link instead. rec.caseLink is a denormalised copy; these are the ways it
+ * goes missing
  */
-describe('View case is always a working link', () => {
+describe('the case summary link is always real', () => {
   test('a record with no stored link still gets a real url', () => {
     const { blocks } = incidentMessage(withCase({ caseLink: null }), []);
-    const button = buttonWith(blocks, ACTIONS.VIEW_CASE);
-
-    expect(button).toBeDefined();
-    expect(button.url).toBe('https://kibana.example.com/app/security/cases/case-1');
+    expect(summaryTextOf(blocks)).toContain(
+      '<https://kibana.example.com/app/security/cases/case-1|'
+    );
   });
 
   test('a relative stored link is replaced with an absolute one', () => {
@@ -182,18 +236,15 @@ describe('View case is always a working link', () => {
       withCase({ caseLink: '/app/security/cases/case-1' }),
       []
     );
-    expect(buttonWith(blocks, ACTIONS.VIEW_CASE).url).toBe(
-      'https://kibana.example.com/app/security/cases/case-1'
+    expect(summaryTextOf(blocks)).toContain(
+      '<https://kibana.example.com/app/security/cases/case-1|'
     );
   });
 
   test('a non-default space is carried into the derived link', () => {
-    const { blocks } = incidentMessage(
-      withCase({ caseLink: undefined, spaceId: 'soc' }),
-      []
-    );
-    expect(buttonWith(blocks, ACTIONS.VIEW_CASE).url).toBe(
-      'https://kibana.example.com/s/soc/app/security/cases/case-1'
+    const { blocks } = incidentMessage(withCase({ caseLink: undefined, spaceId: 'soc' }), []);
+    expect(summaryTextOf(blocks)).toContain(
+      '<https://kibana.example.com/s/soc/app/security/cases/case-1|'
     );
   });
 
@@ -202,26 +253,29 @@ describe('View case is always a working link', () => {
       withCase({ caseLink: null, caseOwner: 'observability' }),
       []
     );
-    expect(buttonWith(blocks, ACTIONS.VIEW_CASE).url).toContain('/app/observability/cases/');
+    expect(summaryTextOf(blocks)).toContain('/app/observability/cases/');
   });
 
-  test('the summary line and the button always agree on the link', () => {
-    const { blocks } = incidentMessage(withCase({ caseLink: null }), []);
-    const url = buttonWith(blocks, ACTIONS.VIEW_CASE).url;
-    expect(JSON.stringify(blocks)).toContain(`<${url}|`);
-  });
-
-  test('no button is ever emitted without a url', () => {
+  test('the link is either absolute or absent - never a half-built one', () => {
     for (const link of [null, undefined, '', 'not a url', '/relative']) {
-      const { blocks } = incidentMessage(withCase({ caseLink: link }), []);
-      const button = buttonWith(blocks, ACTIONS.VIEW_CASE);
-      if (button) expect(button.url).toMatch(/^https?:\/\//);
+      const summary = summaryTextOf(incidentMessage(withCase({ caseLink: link }), []).blocks);
+      const url = summary.match(/<([^|]+)\|/)?.[1];
+      if (url) expect(url).toMatch(/^https?:\/\//);
+      expect(summary).not.toContain('undefined');
     }
   });
 
-  test('a link button carries no value - the url is the whole payload', () => {
-    const { blocks } = incidentMessage(withCase(), []);
-    expect(buttonWith(blocks, ACTIONS.VIEW_CASE)).not.toHaveProperty('value');
+  test('no view-case button is emitted in any state', () => {
+    for (const r of [rec(), withCase(), withCase({ attachedIds: [] })]) {
+      const { blocks } = incidentMessage(r, ['a1']);
+      const text = JSON.stringify(blocks);
+      expect(text).not.toContain('view_case');
+      expect(text).not.toContain('View case');
+      // and nothing on the message is a url button at all
+      for (const el of actionsOf(blocks)?.elements || []) {
+        expect(el).not.toHaveProperty('url');
+      }
+    }
   });
 });
 
@@ -245,9 +299,9 @@ describe('block shape Slack will accept', () => {
 
   test('there is always a text fallback for notifications', () => {
     expect(incidentMessage(rec(), ['a1']).text).toBe('New alert: Malware Detected');
-    expect(
-      incidentMessage(rec({ alertIds: ['a1', 'a2'] }), ['a1', 'a2']).text
-    ).toBe('2 related alerts on web-01: Malware Detected');
+    expect(incidentMessage(rec({ alertIds: ['a1', 'a2'] }), ['a1', 'a2']).text).toBe(
+      '2 related alerts on web-01: Malware Detected'
+    );
   });
 
   test('a record with no alerts does not blow up on alertIds[0]', () => {

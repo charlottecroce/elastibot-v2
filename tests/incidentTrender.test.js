@@ -79,7 +79,12 @@ describe('the happy path', () => {
     expect(slack.chat.postMessage).not.toHaveBeenCalled();
   });
 
-  test('the rendered message carries a clickable View case button', async () => {
+  /*
+   * This record has one alert on the case and one still pending, so the render
+   * has to produce both routes to acting on it: the button, and the command an
+   * analyst falls back to when the button fails
+   */
+  test('the rendered message carries the add-alerts button and the fallback command', async () => {
     const incidents = fakeIncidents(record());
     const slack = fakeSlack();
 
@@ -87,8 +92,23 @@ describe('the happy path', () => {
 
     const { blocks } = slack.chat.update.mock.calls[0][0];
     const actions = blocks.find((b) => b.type === 'actions');
-    const view = actions.elements.find((e) => e.text.text === 'View case');
-    expect(view.url).toMatch(/^https:\/\//);
+    expect(actions.elements).toHaveLength(1);
+    expect(actions.elements[0].action_id).toBe('add_alerts_to_case');
+
+    const fenced = blocks.find((b) => b.text?.text?.startsWith('```'));
+    expect(fenced.text.text).toContain('/add_alert case-1 a2');
+  });
+
+  test('the case is still reachable without a view-case button', async () => {
+    const incidents = fakeIncidents(record());
+    const slack = fakeSlack();
+
+    await renderIncident(slack, incidents, KEY);
+
+    const { blocks } = slack.chat.update.mock.calls[0][0];
+    const text = JSON.stringify(blocks);
+    expect(text).toContain('<https://kibana.example.com/app/security/cases/case-1|');
+    expect(text).not.toContain('view_case');
   });
 
   test('the pending breakdown comes off the record, not off the calling batch', async () => {
