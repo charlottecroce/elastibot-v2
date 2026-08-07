@@ -14,7 +14,13 @@ const ACTIONS = Object.freeze({
   ADD_ALERTS_TO_CASE: 'add_alerts_to_case',
   // "View case" is a url button. Slack still delivers an interaction for those,
   // so it needs a registered no-op handler or Bolt logs an unhandled action on
-  // every single click
+  // every single click.
+  //
+  // Slack also does NOT reject a button whose `url` is missing or relative - it
+  // drops the field, renders the button, and the click does nothing at all. The
+  // url is therefore resolved through
+  // services/kibanaLinks#caseLinkForIncident rather than read straight off the
+  // incident record, and no button is emitted without one
   VIEW_CASE: 'view_case',
   // /start's radio input toggling between "paste my own key" and "create one
   // for me" - swaps the modal's blocks via views.update
