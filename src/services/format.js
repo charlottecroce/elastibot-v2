@@ -5,7 +5,7 @@ const { esc, mrkdwnLink, ruleBreakdown } = require('../util/mrkdwn');
 
 /*
  * Slack message builders.
- * 
+ *
  * functions that return Block Kit.
  * The /stats table helpers stay because statsBlocks is their only consumer
  */
@@ -123,13 +123,17 @@ function caseCreatedBlocks({
     { type: 'context', elements: meta },
     { type: 'context', elements: [rulesEl] },
     {
-      type: 'context',
-      elements: [
-        {
-          type: 'mrkdwn',
-          text: `Add more alerts with \`/add_alert ${esc(caseId)} <alertID>\``,
-        },
-      ],
+      /*
+       * The template with the real case id already in it, inside a fence.
+       *
+       * plain(), not esc(): Slack does not interpret mrkdwn inside a fence, and
+       * a backtick in the id would close it early
+       */
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `Add more alerts:\n\`\`\`\n/add_alert ${plain(caseId, 128)} <alertID>\n\`\`\``,
+      },
     },
   ];
   if (warning) {

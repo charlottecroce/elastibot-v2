@@ -15,13 +15,11 @@ const { ACTIONS, COMMANDS } = require('../constants');
  *   Creates a case for THAT ONE ALERT in the alert's own space, titled per the
  *   naming scheme, and attaches it.
  *
- * Plus the three buttons the alert watcher puts on incident messages:
+ * Plus the two buttons the alert watcher puts on incident messages:
  *   Create case          takes the incident claim, files every alert on the
  *                        message into one case, re-renders the message
  *   Add N alerts to case attaches the pending alerts to the case that already
  *                        exists, re-renders the message
- *   View case            a url button. Slack still sends an interaction, so it
- *                        needs a registered no-op or Bolt warns on every click
  *
  * Swapping the green button for a grey one does NOT by itself make a duplicate
  * case impossible, which is the stated goal. Between the click and the message
@@ -133,7 +131,7 @@ module.exports = function registerCase(reg) {
   );
 
   /*
-   * Amber "Add N new alerts to case" - attaches everything on the message that
+   * Green "Add N new alerts to case" - attaches everything on the message that
    * isn't on the case yet
    */
   reg.action(
@@ -159,7 +157,9 @@ module.exports = function registerCase(reg) {
       const pending = ctx.incidents.pending(rec);
       if (!pending.length) {
         // Two people clicked; the first one already attached them
-        await reply.ephemeral(`Everything on this incident is already on <${rec.caseLink}|${rec.caseId}>.`);
+        await reply.ephemeral(
+          `Everything on this incident is already on <${rec.caseLink}|${rec.caseId}>.`
+        );
         await renderIncident(client, ctx.incidents, key);
         return;
       }
@@ -209,10 +209,4 @@ module.exports = function registerCase(reg) {
     },
     { requireUser: true }
   );
-
-  /*
-   * "View case" is a url button. Slack delivers the interaction anyway; ack it
-   * and do nothing, or every click logs an unhandled action
-   */
-  reg.action(ACTIONS.VIEW_CASE, async () => {}, { requireUser: false });
 };
