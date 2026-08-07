@@ -38,7 +38,6 @@ describe('config validation', () => {
       encryptionKey: 'a-long-enough-test-secret-0123456789',
       userStorePath: './data/users.json',
       statePath: './data/state.json',
-      stateDebounceMs: 0,
     },
     cache: {
       spaceNameTtlMs: 3600000,

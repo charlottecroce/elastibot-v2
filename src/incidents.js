@@ -73,7 +73,7 @@ function union(a = [], b = []) {
 class IncidentStore extends JsonFileStore {
   constructor({
     filePath = config.security.incidentStorePath,
-    debounceMs = config.security.stateDebounceMs,
+    debounceMs = 0,
     idleMs = config.incidents.idleMs,
     maxLifetimeMs = config.incidents.maxLifetimeMs,
     claimTtlMs = config.incidents.claimTtlMs,
