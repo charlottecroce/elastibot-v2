@@ -15,23 +15,6 @@ A Slack bot (Node.js / Bolt) that helps security analysts turn Elastic alerts in
 
 New alerts also arrive in channel with a **Create case** button (same as `/case`).
 
-### `/stats`
-
-Runs one `size:0` aggregation query under your own API key, so you only ever see what you're allowed to see. The reply is ephemeral (it's a wall of text) unless you add `share`.
-
-```
-/stats                              # last 7d, everything
-/stats 30d                          # 24h, 7d, 2w ... up to STATS_MAX_WINDOW_DAYS
-/stats 24h host:web-01
-/stats 30d user:jsmith share
-/stats 7d rule:"Suspicious PowerShell Download"
-/stats 30d space:soc
-/stats help
-```
-
-- **Noisiest** ranks by alerts per distinct host.
-
-Set `STATS_TIMEZONE` to your SOC's timezone or "busiest hour" doesn't mean anything.
 
 ## Setup
 
@@ -70,13 +53,6 @@ npm run test:coverage
 
 Nothing in the suite touches a real cluster or a real Slack workspace: the Elastic client is mocked and [tests/setup.js](tests/setup.js) pins the config the tests assume, so no `.env` is needed.`.github/workflows/tests.yml](.github/workflows/tests.yml) runs the same command on Node 18/20/22 for every push to `main` and every PR.
 
-## Security notes
-
-- Analyst API keys are stored encrypted at rest (AES-256-GCM) when
-  `ELASTIBOT_SECRET_KEY` is set; a startup warning fires if it isn't.
-- Keys are collected via a modal input, so they never appear in channel history.
-- Each user acts with their own Elastic API key, so case ownership/permissions reflect the real analyst. The watchers use a separate service key.
-
 ## Creating API Keys
 
 In Kibana Dev Tools
@@ -90,19 +66,6 @@ POST /_security/api_key
 
 And copy the base64 encoded value.
 
-Then edit the permissions JSON in Stack Management > Security > Api Keys. The permissions JSONs to use are in the api_permissions directory
+Then edit the permissions JSON in Stack Management > Security > Api Keys. The permissions JSONs to use are in the [api_permissions](api_permissions) directory. 
 
-## How the Elastic side works
-
-- **Alert lookup** - an `ids` query against `ALERTS_INDEX` (default
-  `.alerts-security.alerts-*`) resolves the alert, its space (`kibana.space_ids`),
-  rule name/uuid, and solution owner (from `kibana.alert.rule.consumer`).
-- **Case creation** - `POST /s/<space>/api/cases`.
-- **Alert attach** - `POST /s/<space>/api/cases/<id>/comments` with an `alert`
-  attachment (the case and alert share a space).
-- **Space display name** - `GET /api/spaces/space/<id>` for the naming scheme.
-- **Statistics** - one `size:0` `_search` with terms/cardinality/date_histogram
-  aggregations. Hour-of-day and day-of-week are folded out of hourly buckets
-  client-side, so the query needs no runtime scripts.
-- **Watchers** poll ES for new alerts and the Kibana Cases `_find` API per configured
-  space, tracking last-seen timestamps in `data/state.json`.
+There is also an option to auto-create API keys via admins credentials. To configure this, add authorized user's SlackIDs to .env and you'll be able to enter elastic admin credentials to create an analyst API key.
