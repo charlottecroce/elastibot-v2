@@ -1,8 +1,6 @@
 'use strict';
 
 const {
-  caseUrl,
-  esc,
   plain,
   num,
   bar,
@@ -10,69 +8,18 @@ const {
   countTable,
   caseCreatedBlocks,
   alertAddedBlocks,
-  alertGroupBlocks,
+  newCaseBlocks,
 } = require('../src/services/format');
 
 /*
- * caseUrl is the one people notice when it breaks (a link that 404s or bounces
- * an analyst through a login), and the block builders have to keep producing
- * shapes Slack will accept
+ * The block builders have to keep producing shapes Slack will accept.
+ *
+ * Two describe blocks left this file:
+ *   caseUrl          moved with the function to tests/kibanaLinks.test.js
+ *   alertGroupBlocks the function was dead - watchers/alerts.js posts through
+ *                    incidentMessage, covered by tests/incidentBlocks.test.js
+ * The esc cases moved to tests/mrkdwn.test.js along with esc itself
  */
-
-describe('caseUrl', () => {
-  test('default space has no /s/ prefix', () => {
-    expect(caseUrl('default', 'case-1', 'securitySolution')).toBe(
-      'https://kibana.example.com/app/security/cases/case-1'
-    );
-  });
-
-  test('non-default space is prefixed', () => {
-    expect(caseUrl('soc', 'case-1', 'securitySolution')).toBe(
-      'https://kibana.example.com/s/soc/app/security/cases/case-1'
-    );
-  });
-
-  test('owner picks the solution app', () => {
-    expect(caseUrl('default', 'c', 'observability')).toContain('/app/observability/cases/');
-    expect(caseUrl('default', 'c', 'cases')).toContain(
-      '/app/management/insightsAndAlerting/cases/'
-    );
-  });
-
-  test('space id and case id are url encoded', () => {
-    expect(caseUrl('my space', 'a/b', 'securitySolution')).toBe(
-      'https://kibana.example.com/s/my%20space/app/security/cases/a%2Fb'
-    );
-  });
-
-  test('prefers KIBANA_PUBLIC_URL over KIBANA_URL', () => {
-    expect(caseUrl('default', 'c', 'securitySolution')).toContain('kibana.example.com');
-    expect(caseUrl('default', 'c', 'securitySolution')).not.toContain('kibana.internal');
-  });
-
-  test('a trailing slash on the base url does not double up', () => {
-    const previous = process.env.KIBANA_PUBLIC_URL;
-    process.env.KIBANA_PUBLIC_URL = 'https://kibana.example.com/';
-    jest.resetModules();
-    const fresh = require('../src/services/format');
-    expect(fresh.caseUrl('default', 'c', 'securitySolution')).toBe(
-      'https://kibana.example.com/app/security/cases/c'
-    );
-    process.env.KIBANA_PUBLIC_URL = previous;
-    jest.resetModules();
-  });
-});
-
-describe('esc', () => {
-  test('escapes the three mrkdwn-special characters', () => {
-    expect(esc('a & b <script> c')).toBe('a &amp; b &lt;script&gt; c');
-  });
-
-  test('null and undefined become empty strings', () => {
-    expect(esc(null)).toBe('');
-    expect(esc(undefined)).toBe('');
-  });
-});
 
 describe('code-block helpers', () => {
   test('plain strips backticks so a table cannot escape its fence', () => {
@@ -152,7 +99,19 @@ describe('caseCreatedBlocks', () => {
     });
     const text = JSON.stringify(blocks);
     expect(text).toContain('*Alerts:* 4');
+    // Ordered by count now that the shared ruleBreakdown sorts
     expect(text).toContain('Malware ×3, Beaconing ×1');
+  });
+
+  test('the rule breakdown is ordered by count, not by insertion', () => {
+    const blocks = caseCreatedBlocks({
+      caseId: 'c',
+      ruleName: 'Malware',
+      ruleCounts: { Beaconing: 1, Malware: 3 },
+      alertCount: 4,
+      slackUserId: 'U',
+    });
+    expect(JSON.stringify(blocks)).toContain('Malware ×3, Beaconing ×1');
   });
 
   test('a warning is appended only when there is one', () => {
@@ -176,6 +135,18 @@ describe('caseCreatedBlocks', () => {
     });
     expect(JSON.stringify(blocks)).not.toContain('<script>');
   });
+
+  test('a missing link degrades to plain text instead of printing "undefined"', () => {
+    const blocks = caseCreatedBlocks({
+      title: 'SO-070426-Malware',
+      caseId: 'c',
+      alertCount: 1,
+      slackUserId: 'U',
+    });
+    const text = JSON.stringify(blocks);
+    expect(text).toContain('SO-070426-Malware');
+    expect(text).not.toContain('undefined');
+  });
 });
 
 describe('alertAddedBlocks', () => {
@@ -193,48 +164,35 @@ describe('alertAddedBlocks', () => {
     expect(text).toContain('alert-1');
     expect(text).toContain('https://x/y');
   });
+
+  test('no link still names the case', () => {
+    const text = JSON.stringify(
+      alertAddedBlocks({ caseId: 'case-1', alertId: 'a', ruleName: 'R', slackUserId: 'U' })
+    );
+    expect(text).toContain('case-1');
+    expect(text).not.toContain('undefined');
+  });
 });
 
-describe('alertGroupBlocks', () => {
-  test('a single alert renders the plain notification with a Create case button', () => {
-    const blocks = alertGroupBlocks({
-      count: 1,
-      representativeRule: 'Malware',
-      topSeverity: 'high',
-      spaceName: 'default',
-      from: '2026-07-30T12:00:00.000Z',
-      alertId: 'alert-1',
-    });
-    const actions = blocks.find((b) => b.type === 'actions');
-    expect(actions.elements[0].text.text).toBe('Create case');
-    expect(actions.elements[0].value).toBe('alert-1');
-    expect(JSON.stringify(blocks)).toContain('*New alert*');
+describe('newCaseBlocks', () => {
+  test('links the title and reports who created it', () => {
+    const text = JSON.stringify(
+      newCaseBlocks({
+        title: 'SO-070426-Malware',
+        caseId: 'case-1',
+        spaceName: 'Security Operations',
+        link: 'https://x/y',
+        createdBy: 'jsmith',
+      })
+    );
+    expect(text).toContain('<https://x/y|SO-070426-Malware>');
+    expect(text).toContain('jsmith');
   });
 
-  test('a burst renders the rollup and the count on the button', () => {
-    const blocks = alertGroupBlocks({
-      count: 5,
-      representativeRule: 'Malware',
-      ruleCounts: { Malware: 4, Beaconing: 1 },
-      topSeverity: 'critical',
-      userName: 'jsmith',
-      hostName: 'web-01',
-      spaceName: 'default',
-      from: 'a',
-      to: 'b',
-      alertId: 'alert-1',
-      buttonValue: '{"k":"g"}',
-    });
-    const actions = blocks.find((b) => b.type === 'actions');
-    expect(actions.elements[0].text.text).toBe('Create case (5 alerts)');
-    expect(actions.elements[0].value).toBe('{"k":"g"}');
-    expect(JSON.stringify(blocks)).toContain('*5 related alerts*');
-  });
-
-  test('user and host lines are omitted when the alert has neither', () => {
-    const blocks = alertGroupBlocks({ count: 1, representativeRule: 'R', alertId: 'a' });
-    const context = blocks.find((b) => b.type === 'context');
-    expect(JSON.stringify(context)).not.toContain('*User:*');
-    expect(JSON.stringify(context)).not.toContain('*Host:*');
+  test('an unknown creator is labelled rather than left blank', () => {
+    const text = JSON.stringify(
+      newCaseBlocks({ title: 'T', caseId: 'c', spaceName: 's', link: 'https://x' })
+    );
+    expect(text).toContain('unknown');
   });
 });

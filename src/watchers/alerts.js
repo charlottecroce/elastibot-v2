@@ -6,6 +6,7 @@ const { incidentMessage } = require('../services/incidentBlocks');
 const { renderIncident } = require('../services/incidentRender');
 const { groupAlerts } = require('../grouping');
 const { STATE_KEYS } = require('../constants');
+const { sleep } = require('../util/sleep');
 const { logger } = require('../util/logger');
 
 /*
@@ -25,7 +26,6 @@ const { logger } = require('../util/logger');
  */
 
 const log = logger.child({ scope: 'watcher:alerts' });
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * @param {object} deps
@@ -207,8 +207,6 @@ async function updateIncident({ slack, incidents, existing, group, result }) {
     return;
   }
 
-  const pending = incidents.pending(rec);
-
   await renderIncident(slack, incidents, rec.key, { repostIfGone: true });
 
   result.updated += 1;
@@ -216,7 +214,9 @@ async function updateIncident({ slack, incidents, existing, group, result }) {
     key: rec.key,
     added: addedIds.length,
     total: rec.alertIds.length,
-    pending: pending.length,
+    // Computed here rather than above the render, so it's clear the render does
+    // not depend on it - renderIncident derives its own pending list off the record
+    pending: incidents.pending(rec).length,
     caseId: rec.caseId,
   });
 }

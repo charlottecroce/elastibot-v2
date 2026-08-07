@@ -3,7 +3,8 @@
 const { randomUUID } = require('crypto');
 const config = require('../config');
 const { JsonFileStore } = require('./store');
-const { SEVERITY_RANK } = require('./constants');
+const { SEVERITY_RANK, UNKNOWN_RULE } = require('./constants');
+const { caseUrl, isAbsoluteHttpUrl } = require('./services/kibanaLinks');
 const { logger } = require('./util/logger');
 
 const log = logger.child({ scope: 'incidents' });
@@ -185,15 +186,20 @@ class IncidentStore extends JsonFileStore {
 
       /*
        * id > rule name for every alert on the message.
-        *   This is the source of truth for ruleCounts and representativeRule, which
-       *    are derived from it by _recount. The two can never disagree because
-       *    there is only one source.
+       * This is the source of truth for ruleCounts and representativeRule,
+       * which are derived from it by _recount. The two can never disagree
+       * because there is only one source
        */
-      alertRules: Object.fromEntries(group.alerts.map((a) => [a.id, a.ruleName || 'Unknown Rule'])),
+      alertRules: Object.fromEntries(
+        group.alerts.map((a) => [a.id, a.ruleName || UNKNOWN_RULE])
+      ),
 
       caseId: null,
       caseLink: null,
       caseTitle: null,
+      // The Kibana solution the case belongs to. Stored so a "View case" link
+      // can be rebuilt from the record alone - see recordCase below
+      caseOwner: null,
       claim: null,
 
       // Derived from alertRules by _recount, not stored independently
@@ -237,7 +243,7 @@ class IncidentStore extends JsonFileStore {
 
     rec.alertIds = union(rec.alertIds, incoming);
     rec.userNames = union(rec.userNames, group.userNames || []);
-    for (const a of group.alerts) rec.alertRules[a.id] = a.ruleName || 'Unknown Rule';
+    for (const a of group.alerts) rec.alertRules[a.id] = a.ruleName || UNKNOWN_RULE;
     this._recount(rec);
 
     // Severity only ever ratchets up - an incident that produced a critical
@@ -325,14 +331,21 @@ class IncidentStore extends JsonFileStore {
     this._persist();
   }
 
-  /** Record the case and mark which alerts made it on. Clears the claim */
-  recordCase(key, { caseId, link, title }, attachedIds = []) {
+  /**
+   * Record the case and mark which alerts made it on. Clears the claim.
+   *
+   * @param {string} key
+   * @param {{caseId: string, link?: string, title?: string, owner?: string}} result
+   * @param {string[]} [attachedIds]
+   */
+  recordCase(key, { caseId, link, title, owner }, attachedIds = []) {
     const rec = this.data[key];
     if (!rec) return null;
 
     rec.caseId = caseId;
-    rec.caseLink = link;
     rec.caseTitle = title;
+    rec.caseOwner = owner || null;
+    rec.caseLink = isAbsoluteHttpUrl(link) ? link : caseUrl(rec.spaceId, caseId, owner);
     rec.attachedIds = union(rec.attachedIds, attachedIds);
     rec.claim = null;
     rec.lastActivityAt = new Date().toISOString();

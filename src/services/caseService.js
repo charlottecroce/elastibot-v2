@@ -3,7 +3,7 @@
 const config = require('../../config');
 const { createElasticClient } = require('../elastic');
 const { buildCaseTitle, monthYearTag } = require('../naming');
-const { caseUrl } = require('./format');
+const { caseUrl } = require('./kibanaLinks');
 const { getSpaceName } = require('./spaceService');
 const { ALERT_STATUS_FOR_CASE, DEFAULT_SPACE, UNKNOWN_RULE } = require('../constants');
 const { UserFacingError, describeAxiosError } = require('../util/errors');
@@ -38,6 +38,34 @@ function dedupeById(list) {
 /** Key with the highest count in a { key: count } map */
 function topKey(counts) {
   return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0];
+}
+
+/** An error status that means "this one id isn't there"*/
+const MISSING_STATUSES = new Set([400, 404]);
+
+/**
+ * Resolve alert ids to alerts, tolerating individual misses but not a systemic failure.
+ *
+ * @param {object} client
+ * @param {string[]} alertIds
+ * @returns {Promise<object[]>} deduped alerts, in the order the ids came in
+ */
+async function fetchAlertsByIds(client, alertIds) {
+  const settled = await Promise.all(
+    alertIds.map((id) =>
+      client
+        .getAlertById(id)
+        .then((alert) => ({ alert }))
+        .catch((err) => ({ err }))
+    )
+  );
+
+  const fatal = settled.find(
+    ({ err }) => err && !MISSING_STATUSES.has(err.response?.status)
+  );
+  if (fatal) throw describeAxiosError(fatal.err, 'Looking up alerts');
+
+  return dedupeById(settled.map(({ alert }) => alert).filter(Boolean));
 }
 
 /**
@@ -161,6 +189,8 @@ async function createCaseFromAlerts(client, alerts) {
     title,
     spaceId,
     spaceName,
+    // `owner` is what incidents.recordCase stores as rec.caseOwner, so a
+    // "View case" link can be rebuilt from the record alone later
     owner,
     ruleName: representativeRule,
     ruleCounts,
@@ -265,16 +295,7 @@ async function createCaseForGroup(apiKey, { spaceId, userName, hostName, from, t
 async function createCaseForIds(apiKey, alertIds, { spaceId } = {}) {
   const client = createElasticClient(apiKey);
 
-  let fetched;
-  try {
-    fetched = await Promise.all(
-      alertIds.map((id) => client.getAlertById(id).catch(() => null))
-    );
-  } catch (err) {
-    throw describeAxiosError(err, 'Looking up alerts');
-  }
-
-  let alerts = dedupeById(fetched.filter(Boolean));
+  let alerts = await fetchAlertsByIds(client, alertIds);
   if (spaceId) alerts = alerts.filter((a) => a.spaceId === spaceId);
 
   if (!alerts.length) {
@@ -302,16 +323,7 @@ async function createCaseForIds(apiKey, alertIds, { spaceId } = {}) {
 async function attachAlertsToCase(apiKey, { spaceId, caseId, alertIds }) {
   const client = createElasticClient(apiKey);
 
-  let fetched;
-  try {
-    fetched = await Promise.all(
-      alertIds.map((id) => client.getAlertById(id).catch(() => null))
-    );
-  } catch (err) {
-    throw describeAxiosError(err, 'Looking up alerts');
-  }
-
-  const alerts = dedupeById(fetched.filter(Boolean));
+  const alerts = await fetchAlertsByIds(client, alertIds);
   if (!alerts.length) {
     // Nothing to attach is not fatal - the caller (commands/case.js) still has
     // a valid case and should just report that nothing new landed
@@ -319,7 +331,7 @@ async function attachAlertsToCase(apiKey, { spaceId, caseId, alertIds }) {
       caseId,
       attachedIds: [],
       warning:
-        "None of the pending alerts could be found — they may have aged out of the index.",
+        'None of the pending alerts could be found — they may have aged out of the index.',
     };
   }
 
