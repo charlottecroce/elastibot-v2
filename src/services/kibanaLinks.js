@@ -2,6 +2,7 @@
 
 const config = require('../../config');
 const { DEFAULT_SPACE } = require('../constants');
+const { isAbsoluteHttpUrl } = require('../util/url');
 
 /*
  * Kibana URL construction.
@@ -21,19 +22,6 @@ const APP_PATH_BY_OWNER = Object.freeze({
 
 /** Stack-management cases, for any owner that isn't a solution of its own */
 const DEFAULT_APP_PATH = '/app/management/insightsAndAlerting/cases';
-
-/**
- * True only for an absolute http(s) URL.
- */
-function isAbsoluteHttpUrl(value) {
-  if (typeof value !== 'string' || value === '') return false;
-  try {
-    const u = new URL(value);
-    return u.protocol === 'http:' || u.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Build a Kibana link to a case, respecting space + solution.

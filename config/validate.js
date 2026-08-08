@@ -1,8 +1,7 @@
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
 const { ConfigError } = require('../src/util/errors');
+const { isAbsoluteHttpUrl } = require('../src/util/url');
 const { logger } = require('../src/util/logger');
 
 /*
@@ -18,28 +17,6 @@ const CASE_OWNERS = ['securitySolution', 'observability', 'cases'];
 // Shape of an Elastic field name, for the values interpolated into aggregations
 const FIELD_NAME_RE = /^[a-zA-Z0-9_.@*-]+$/;
 
-function isHttpUrl(value) {
-  try {
-    const u = new URL(value);
-    return u.protocol === 'http:' || u.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
-/*
- * Node resolves `require('./config')` to config.js before config/, so a
- * leftover root config.js shadows this directory entirely
- */
-function assertNoStaleConfigFile() {
-  const stale = path.join(__dirname, '..', 'config.js');
-  if (fs.existsSync(stale)) {
-    throw new ConfigError(
-      `A stale ${stale} is shadowing config/index.js. Delete it and restart.`
-    );
-  }
-}
-
 /**
  * @param {object} config
  * @param {object} [opts]
@@ -47,8 +24,6 @@ function assertNoStaleConfigFile() {
  * @returns {{errors: string[], warnings: string[]}}
  */
 function validateConfig(config, { throwOnError = true } = {}) {
-  if (throwOnError) assertNoStaleConfigFile();
-
   const errors = [];
   const warnings = [];
 
@@ -69,7 +44,7 @@ function validateConfig(config, { throwOnError = true } = {}) {
   };
 
   const url = (value, name) => {
-    if (value && !isHttpUrl(value)) {
+    if (value && !isAbsoluteHttpUrl(value)) {
       errors.push(`${name} must be an http(s) URL, got ${JSON.stringify(value)}`);
     }
   };

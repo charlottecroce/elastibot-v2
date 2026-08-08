@@ -1,7 +1,7 @@
 'use strict';
 
 const { ACTIONS } = require('../constants');
-const { esc, code, mrkdwnLink, ruleBreakdown } = require('../util/mrkdwn');
+const { esc, code, fenceSafeToken, mrkdwnLink, ruleBreakdown } = require('../util/mrkdwn');
 const { caseLinkForIncident } = require('./kibanaLinks');
 
 /*
@@ -22,16 +22,6 @@ const { caseLinkForIncident } = require('./kibanaLinks');
 /** Past this many, the pending id list is noise rather than something to
  *  reconcile by hand */
 const MAX_PENDING_IDS_SHOWN = 10;
-
-/*
- * Fence-safe text. Inside a ``` block Slack does NOT interpret mrkdwn, so this
- * takes no esc() - same convention as format.js#plain. A stray backtick would
- * close the fence early and spill the remaining commands into the message as
- * prose, so it gets stripped
- */
-function fenceSafe(s) {
-  return String(s ?? '').replace(/[`\r\n]+/g, '');
-}
 
 /** "`jsmith` (+SYSTEM, svc_backup)" - the machine identities folded in by
  *  grouping.js are shown, not hidden, or the merge looks like a bug */
@@ -103,6 +93,10 @@ function caseSummaryBlock(rec, caseLink, totalCount) {
  * ends up on the case. Slack puts a copy affordance on a fenced block and
  * leaves its contents unformatted, so the whole list survives a paste.
  *
+ * Running one of these commands updates this message too - commands/add_alert.js
+ * records the attach against the incident and re-renders - so the pending count
+ * below stays honest whichever route the analyst takes.
+ *
  * A `section` and not a `context`: context text renders small and grey, and on
  * mobile it wraps mid-id. Slack caps a section's text at 3000 chars - ten
  * UUID-length commands is roughly 500, so MAX_PENDING_IDS_SHOWN keeps this well
@@ -119,7 +113,14 @@ function pendingBlocks(rec, pendingIds, pendingRuleCounts) {
   const shown = pendingIds.slice(0, MAX_PENDING_IDS_SHOWN);
   const more = pendingCount - shown.length;
 
-  const commands = shown.map((id) => `/add_alert ${fenceSafe(rec.caseId)} ${fenceSafe(id)}`);
+  /*
+   * fenceSafeToken, not fenceSafe: both ids are whitespace-delimited arguments
+   * to the command below. A backtick collapsed to a space would split one into
+   * two, and `/add_alert case-1 a2 whoami` runs happily against alert `a2`
+   */
+  const commands = shown.map(
+    (id) => `/add_alert ${fenceSafeToken(rec.caseId)} ${fenceSafeToken(id)}`
+  );
 
   const blocks = [
     { type: 'divider' },

@@ -215,59 +215,12 @@ async function createCaseForAlert(apiKey, alertId) {
 }
 
 /**
- * The grouped "Create case" button, driven by a query rather than a known id
- * list. Re-runs the user+host+time-range query so the case captures the whole
- * burst (and any stragglers) at click time.
- *
- * NOTE: the incident-based flow (src/commands/case.js) uses createCaseForIds
- * instead, since an open incident record already carries the authoritative
- * alert id list - it does not need (and must not get) a fresh query that could
- * disagree with what the Slack message is showing. This function remains for
- * any caller that only has a user+host+time descriptor, not a concrete id list.
- */
-async function createCaseForGroup(apiKey, { spaceId, userName, hostName, from, to }) {
-  const client = createElasticClient(apiKey);
-
-  let alerts;
-  try {
-    alerts = await client.getRelatedAlerts({
-      spaceId,
-      userName,
-      hostName,
-      from,
-      to,
-      size: config.grouping.maxAlertsPerCase,
-    });
-  } catch (err) {
-    throw describeAxiosError(err, 'Looking up alerts');
-  }
-  alerts = dedupeById(alerts || []);
-  if (!alerts.length) {
-    throw new UserFacingError(
-      'No alerts found for this group — they may have aged out of the index.'
-    );
-  }
-
-  // Hitting the cap means the case holds only part of the incident
-  if (alerts.length >= config.grouping.maxAlertsPerCase) {
-    log.warn('group hit the alert cap - the case may not contain the whole incident', {
-      spaceId,
-      userName,
-      hostName,
-      cap: config.grouping.maxAlertsPerCase,
-    });
-  }
-
-  return createCaseFromAlerts(client, alerts);
-}
-
-/**
  * Create one case from an explicit list of alert ids already known to the
- * caller - an open incident's rec.alertIds. Unlike createCaseForGroup, this
- * does NOT re-run the user+host+time query: the incident record is already
- * the authoritative list of what the Slack message shows, and a fresh query
- * could disagree with it (an alert that aged out of the window, a stale
- * cursor, etc). Backs the green "Create case" button on a posted incident.
+ * caller - an open incident's rec.alertIds. Deliberately does NOT re-run a
+ * user+host+time query: the incident record is already the authoritative list
+ * of what the Slack message shows, and a fresh query could disagree with it (an
+ * alert that aged out of the window, a stale cursor, etc). Backs the green
+ * "Create case" button on a posted incident.
  *
  * @param {string} apiKey
  * @param {string[]} alertIds
@@ -419,7 +372,6 @@ async function addAlertToCase(apiKey, caseId, alertId) {
 
 module.exports = {
   createCaseForAlert,
-  createCaseForGroup,
   createCaseForIds,
   attachAlertsToCase,
   addAlertToCase,

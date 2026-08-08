@@ -1,5 +1,6 @@
 'use strict';
 
+const { sleep } = require('./sleep');
 const { logger } = require('./logger');
 
 /*
@@ -70,8 +71,6 @@ function backoffMs(attempt, baseMs) {
   const ceiling = baseMs * 2 ** (attempt - 1);
   return Math.round(Math.random() * ceiling);
 }
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Install retry on an axios instance.
