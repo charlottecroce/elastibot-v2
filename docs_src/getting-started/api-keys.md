@@ -37,9 +37,7 @@ The analyst descriptor needs `write` on the alerts indices because attaching an 
 
 ## Letting Elastibot create an API key
 
-`/start` can also call `POST /_security/api_key` itself, so an analyst never has to touch Dev Tools. Pick "create one for me" in the modal, paste an admin username and password, and Elastibot creates a key named
-`elastibot-<username>`, scoped with the exact same
-`api_permissions/elastibot_analyst.json` role descriptor an admin would have pasted by hand. Loading it from that one file is deliberate: the manual and automatic paths can't drift apart.
+`/start` can also call `POST /_security/api_key` itself, so an analyst never has to touch Dev Tools. Pick "create one for me" in the modal, paste an admin username and password, and Elastibot creates a key named `elastibot-<username>`, scoped with the exact same `api_permissions/elastibot_analyst.json` role descriptor an admin would have pasted by hand.
 
 The admin credential authenticates over HTTP Basic for that one request and is never stored, cached, or logged. It doesn't go into the client cache, which only ever holds API-key-authenticated clients.
 
