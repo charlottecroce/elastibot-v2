@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>Installation - elastibot-v2</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Installation";
+        var mkdocs_page_input_path = "getting-started/install.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> elastibot-v2
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">Table of Contents</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Getting Started</span></p>
+              <ul class="current">
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">Installation</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#requirements">Requirements</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#creating-the-slack-app">Creating the Slack app</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#configuration">Configuration</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#running-it">Running it</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#checking-it-worked">Checking it worked</a>
+    </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../api-keys/">Elastic API Keys</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Using Elastibot</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../using/commands/">Slash Commands</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../using/incident-messages/">Incident Messages</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">How It Works</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/architecture/">Architecture</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/watchers/">The Watchers</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/grouping/">Alert Grouping</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/incidents/">Incidents</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/cases/">Cases</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/storage/">Storage</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Reference</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../reference/configuration/">Configuration</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../reference/logging/">Logging and Errors</a>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../../developer-guide/">Developer Guide</a>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">elastibot-v2</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Getting Started</li>
+      <li class="breadcrumb-item active">Installation</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/charlottecroce/elastibot-v2/edit/main/docs_src/getting-started/install.md">Edit on elastibot-v2</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h1>
+<h2 id="requirements">Requirements<a class="headerlink" href="#requirements" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Node.js 18 or newer (CI runs the suite on 22.x)</li>
+<li>npm</li>
+<li>An Elasticsearch cluster with Kibana, reachable from wherever you run the bot</li>
+<li>A Slack workspace you can install an app into</li>
+</ul>
+<p>Elastibot talks to Elasticsearch directly for alert lookups and to Kibana for the Cases and Spaces APIs. One Elastic API key authenticates to both, so you need one credential per identity, not two.</p>
+<pre class="codehilite"><code class="language-bash">git clone https://github.com/charlottecroce/elastibot-v2.git
+cd elastibot-v2
+npm install
+</code></pre>
+
+<h2 id="creating-the-slack-app">Creating the Slack app<a class="headerlink" href="#creating-the-slack-app" title="Permanent link">&para;</a></h2>
+<p>Go to <a href="https://api.slack.com/apps">api.slack.com/apps</a> → <em>From an app manifest</em> and paste in <a href="https://github.com/charlottecroce/elastibot-v2/blob/main/manifest.yml"><code>manifest.yml</code></a> from the repo root. That declares the four slash commands, the bot scopes (<code>commands</code>, <code>chat:write</code>, <code>chat:write.public</code>) and turns on Socket Mode and interactivity.</p>
+<p>Then collect three secrets:</p>
+<ol>
+<li><strong>Basic Information → Signing Secret</strong> → <code>SLACK_SIGNING_SECRET</code></li>
+<li><strong>Basic Information → App-Level Tokens</strong> → generate one with the
+   <code>connections:write</code> scope → <code>SLACK_APP_TOKEN</code> (starts with <code>xapp-</code>). The name
+   doesn't matter.</li>
+<li><strong>Install App → Bot User OAuth Token</strong> → <code>SLACK_BOT_TOKEN</code> (starts with <code>xoxb-</code>)</li>
+</ol>
+<p>Finally, invite the bot to whatever channel you're routing alerts to, and grab
+that channel's ID for <code>DEFAULT_CHANNEL</code>.</p>
+<h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
+<p>Secrets go in <code>.env</code>. Everything else lives in <code>config/index.js</code>, which reads env vars but has a sensible default for each, so you can leave most of it alone.</p>
+<pre class="codehilite"><code class="language-bash">cp .env.example .env
+
+openssl rand -hex 16   # 32-char string for ELASTIBOT_SECRET_KEY
+</code></pre>
+
+<p>The bare minimum to get running:</p>
+<pre class="codehilite"><code class="language-bash">SLACK_BOT_TOKEN=xoxb-...
+SLACK_SIGNING_SECRET=...
+SLACK_APP_TOKEN=xapp-...
+
+KIBANA_URL=https://kibana.internal:5601
+ELASTICSEARCH_URL=https://es.internal:9200
+ELASTIC_SERVICE_API_KEY=base64EncodedApiKey=
+
+ELASTIBOT_SECRET_KEY=&lt;the openssl output&gt;
+DEFAULT_CHANNEL=C0123456789
+</code></pre>
+
+<p>Two things worth setting even though they're optional:</p>
+<p><code>KIBANA_PUBLIC_URL</code> is the endpoint an analyst's <em>browser</em> reaches, as opposed to
+<code>KIBANA_URL</code>, which is the endpoint the bot's HTTP client uses. Every case link posted in Slack is built from the public one. If analysts get at Kibana through a proxy and you leave this unset, every link points at the internal hostname and clicking one forces a re-login.</p>
+<p><code>STATS_TIMEZONE</code> is what <code>/stats</code> buckets hour-of-day and day-of-week into. Set it to your SOC's timezone or "busiest hour" doesn't mean anything.</p>
+<p>The full list is in <a href="../../reference/configuration/">Configuration</a>.</p>
+<h2 id="running-it">Running it<a class="headerlink" href="#running-it" title="Permanent link">&para;</a></h2>
+<pre class="codehilite"><code class="language-bash">npm start        # node app.js
+npm run dev      # node --watch app.js
+</code></pre>
+
+<p>Socket Mode is the default, so there's no public URL and no inbound firewall rule to argue about, which is good for an internal deployment. Set <code>SLACK_SOCKET_MODE=false</code> to run an HTTP server on <code>PORT</code> instead, which means you also have to set up request URLs in the Slack app config.</p>
+<h2 id="checking-it-worked">Checking it worked<a class="headerlink" href="#checking-it-worked" title="Permanent link">&para;</a></h2>
+<p><code>validateConfig</code> runs before anything connects and throws a <code>ConfigError</code> listing everything that's wrong.</p>
+<p>It also emits warnings for things that are legal but probably not what you wanted, and those are worth reading:</p>
+<ul>
+<li><code>ELASTIBOT_SECRET_KEY is not set</code> - analyst API keys go to disk in plaintext</li>
+<li><code>WATCHERS_ENABLED is true but ELASTIC_SERVICE_API_KEY is not set</code> - the
+  watchers won't run at all</li>
+<li><code>no DEFAULT_CHANNEL and no channelRouting entries</code> - the watchers run and post
+  nothing</li>
+<li><code>ELASTIC_TLS_REJECT_UNAUTHORIZED=false</code> - fine for an internal cluster with a
+  self-signed cert, not fine otherwise</li>
+</ul>
+<p>A healthy start logs <code>elastibot started</code> and then <code>watchers started</code> with the poll interval and which pollers are enabled. First tick doesn't backfill: with no cursor on disk the watchers set one to <em>now</em> and watch forward, rather than dumping a month of history into the channel.</p>
+<p>From there, run <code>/start</code> in Slack to register yourself.</p>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../.." class="btn btn-neutral float-left" title="Table of Contents"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../api-keys/" class="btn btn-neutral float-right" title="Elastic API Keys">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/charlottecroce/elastibot-v2" class="fa fa-code-fork" style="color: #fcfcfc"> elastibot-v2</a>
+        </span>
+    
+    
+      <span><a href="../.." style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../api-keys/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+      <script src="../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

@@ -1,7 +1,6 @@
 'use strict';
 
 const {
-  plain,
   num,
   bar,
   sparkline,
@@ -14,23 +13,9 @@ const {
 /*
  * The block builders have to keep producing shapes Slack will accept.
  *
- * Two describe blocks left this file:
- *   caseUrl          moved with the function to tests/kibanaLinks.test.js
- *   alertGroupBlocks the function was dead - watchers/alerts.js posts through
- *                    incidentMessage, covered by tests/incidentBlocks.test.js
- * The esc cases moved to tests/mrkdwn.test.js along with esc itself
  */
 
 describe('code-block helpers', () => {
-  test('plain strips backticks so a table cannot escape its fence', () => {
-    expect(plain('rm -rf `whoami`')).not.toContain('`');
-  });
-
-  test('plain collapses newlines and truncates', () => {
-    expect(plain('one\ntwo')).toBe('one two');
-    expect(plain('x'.repeat(50), 10)).toHaveLength(10);
-  });
-
   test('num groups thousands', () => {
     expect(num(1204)).toBe('1,204');
     expect(num(1000000)).toBe('1,000,000');
@@ -65,6 +50,12 @@ describe('code-block helpers', () => {
 
   test('countTable handles an empty list', () => {
     expect(countTable([])).not.toContain('```');
+  });
+
+  test('a label with a backtick in it cannot close the table fence early', () => {
+    const table = countTable([{ label: 'rm -rf `whoami`', count: 1 }]);
+    // three at the top, three at the bottom, and none in between
+    expect(table.split('```')).toHaveLength(3);
   });
 });
 

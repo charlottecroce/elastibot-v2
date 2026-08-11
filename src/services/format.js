@@ -1,28 +1,18 @@
 'use strict';
 
 const config = require('../../config');
-const { esc, mrkdwnLink, ruleBreakdown } = require('../util/mrkdwn');
+const { esc, fenceSafe, fenceSafeToken, mrkdwnLink, ruleBreakdown } = require('../util/mrkdwn');
 
 /*
  * Slack message builders.
  *
  * functions that return Block Kit.
  * The /stats table helpers stay because statsBlocks is their only consumer
+ *
+ * Anything rendered inside a ``` fence goes through fenceSafe (util/mrkdwn),
+ * not esc: Slack does not interpret mrkdwn in a fence, so the hazard is a
+ * stray backtick closing it early rather than an unescaped angle bracket
  */
-
-/*
- * Helpers for the /stats tables. Those live inside ``` fences, where Slack does
- * NOT interpret mrkdwn - so they take plain(), not esc(). A stray backtick would
- * close the fence early, so it gets swapped out
- */
-
-/** Single-line, fence-safe, length-capped text for use inside a code block */
-function plain(s, max = 34) {
-  const one = String(s ?? '')
-    .replace(/[`\r\n]+/g, ' ')
-    .trim();
-  return one.length > max ? `${one.slice(0, max - 1)}…` : one;
-}
 
 /** 1204 > "1,204" */
 function num(n) {
@@ -61,7 +51,7 @@ function sparkline(values) {
 function countTable(items, { barWidth = 10, labelWidth = 34 } = {}) {
   if (!items || !items.length) return '_nothing in this window_';
   const max = maxOf(items.map((i) => i.count));
-  const labels = items.map((i) => plain(i.label, labelWidth));
+  const labels = items.map((i) => fenceSafe(i.label, { max: labelWidth }));
   const nameW = maxOf(labels.map((l) => l.length));
   const countW = maxOf(items.map((i) => num(i.count).length));
   const lines = items.map((i, idx) => {
@@ -70,7 +60,7 @@ function countTable(items, { barWidth = 10, labelWidth = 34 } = {}) {
       max,
       barWidth
     )}`;
-    return i.note ? `${row}  ${plain(i.note, 40)}` : row;
+    return i.note ? `${row}  ${fenceSafe(i.note, { max: 40 })}` : row;
   });
   return `\`\`\`\n${lines.join('\n')}\n\`\`\``;
 }
@@ -126,13 +116,16 @@ function caseCreatedBlocks({
       /*
        * The template with the real case id already in it, inside a fence.
        *
-       * plain(), not esc(): Slack does not interpret mrkdwn inside a fence, and
-       * a backtick in the id would close it early
+       * Not esc(): Slack does not interpret mrkdwn inside a fence, and a
+       * backtick in the id would close it early. fenceSafeToken specifically,
+       * because this is a runnable command and the id is one of its arguments -
+       * the old plain() here collapsed a backtick to a space, which would have
+       * split the id in two and pointed the command at something else
        */
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `Add more alerts:\n\`\`\`\n/add_alert ${plain(caseId, 128)} <alertID>\n\`\`\``,
+        text: `Add more alerts:\n\`\`\`\n/add_alert ${fenceSafeToken(caseId, { max: 128 })} <alertID>\n\`\`\``,
       },
     },
   ];
@@ -330,7 +323,6 @@ const STATS_USAGE =
   '_e.g._ `/stats 30d space:soc`';
 
 module.exports = {
-  plain,
   num,
   bar,
   sparkline,

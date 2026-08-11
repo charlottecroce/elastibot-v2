@@ -40,16 +40,60 @@
 
       <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
               <ul>
-                <li class="toctree-l1"><a class="reference internal" href="..">Getting Started</a>
+                <li class="toctree-l1"><a class="reference internal" href="..">Table of Contents</a>
                 </li>
               </ul>
+              <p class="caption"><span class="caption-text">Getting Started</span></p>
               <ul>
-                <li class="toctree-l1"><a class="reference internal" href="../about/">About elastibot-v2</a>
-                </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../getting-started/install/">Installation</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../getting-started/api-keys/">Elastic API Keys</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Using Elastibot</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../using/commands/">Slash Commands</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../using/incident-messages/">Incident Messages</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">How It Works</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../internals/architecture/">Architecture</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../internals/watchers/">The Watchers</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../internals/grouping/">Alert Grouping</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../internals/incidents/">Incidents</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../internals/cases/">Cases</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../internals/storage/">Storage</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Reference</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../reference/configuration/">Configuration</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../reference/logging/">Logging and Errors</a>
+                  </li>
               </ul>
               <ul class="current">
                 <li class="toctree-l1 current"><a class="reference internal current" href="#">Developer Guide</a>
     <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#module-dependency-order">Module dependency order</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#adding-a-slash-command">Adding a slash command</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#adding-a-button">Adding a button</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#tests">Tests</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#lint-and-syntax-checks">Lint and syntax checks</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#building-these-docs">Building these docs</a>
+    </li>
     </ul>
                 </li>
               </ul>
@@ -78,11 +122,130 @@
             <div class="section" itemprop="articleBody">
               
                 <h1 id="developer-guide">Developer Guide<a class="headerlink" href="#developer-guide" title="Permanent link">&para;</a></h1>
+<h2 id="module-dependency-order">Module dependency order<a class="headerlink" href="#module-dependency-order" title="Permanent link">&para;</a></h2>
+<p>Roughly bottom to top. Anything can require downward; requiring upward is likely not good design and usually means the thing belongs in <code>services/</code>.</p>
+<pre class="codehilite"><code>util/logger                    depends on nothing
+util/{crypto,errors,cache,atomicFile,retry,sleep,url,mrkdwn}
+config/                        depends on util
+constants.js
+store.js, incidents.js         depends on config + util
+elastic.js                     depends on config + util
+grouping.js, naming.js         depends on config + constants
+services/                      depends on all of the above
+commands/, watchers/           depends on services
+context.js                     assembles the stores
+app.js                         wires everything
+</code></pre>
+
+<p><code>services/incidentRender.js</code> exists specifically because of that rule. Both the watcher (new alerts folded in) and the button handlers in <code>commands/case.js</code> (a case made, alerts attached) need to re-render an incident message, and a command module requiring the watcher would be backwards coupling. There should be exactly one place that knows how to put an incident on screen.</p>
+<h2 id="adding-a-slash-command">Adding a slash command<a class="headerlink" href="#adding-a-slash-command" title="Permanent link">&para;</a></h2>
+<p>Drop a file in <code>src/commands/</code> that exports a register function. Discovery is automatic, there's no <code>app.js</code> edit step.</p>
+<pre class="codehilite"><code class="language-js">'use strict';
+
+const { COMMANDS } = require('../constants');
+
+module.exports = function registerThing(reg) {
+  reg.command(
+    COMMANDS.THING,
+    async ({ argv, user, reply, ctx, log }) =&gt; {
+      // user.apiKey is the analyst's decrypted Elastic key
+      await reply.ephemeral('hello');
+    },
+    {
+      requireUser: true,
+      usage: 'Usage: `/thing &lt;id&gt;`',
+      minArgs: 1,
+    }
+  );
+};
+</code></pre>
+
+<p>Files starting with <code>_</code> are skipped, for helpers that live alongside commands but aren't commands. <code>index.js</code> is skipped too. Registration order is alphabetical and therefore deterministic.</p>
+<p>A module exporting the wrong shape is logged at <code>error</code> and skipped rather than failing silently.</p>
+<p>Handler args, on top of what Bolt gives you:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ctx</code></td>
+<td>the application context (<code>users</code>, <code>state</code>, <code>incidents</code>, <code>spaces</code>)</td>
+</tr>
+<tr>
+<td><code>log</code></td>
+<td>scoped logger, already carrying <code>traceId</code> and <code>slackUserId</code></td>
+</tr>
+<tr>
+<td><code>reply</code></td>
+<td><code>.ephemeral(msg)</code> / <code>.inChannel(msg)</code>, string or Block Kit payload</td>
+</tr>
+<tr>
+<td><code>user</code></td>
+<td>the registered user record, when <code>requireUser</code> is set</td>
+</tr>
+<tr>
+<td><code>text</code>, <code>argv</code></td>
+<td>trimmed command text, and it split on whitespace</td>
+</tr>
+<tr>
+<td><code>traceId</code>, <code>slackUserId</code></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>Options: <code>requireUser</code>, <code>usage</code>, <code>minArgs</code>, <code>userErrorSuffix</code>, <code>autoAck</code>.</p>
+<p>Then add the command to <code>COMMANDS</code> in <code>src/constants.js</code> <strong>and</strong> to <code>manifest.yml</code>. Those two have to agree; <code>constants.js</code> exists so the mismatch is at least in one obvious place.</p>
+<h2 id="adding-a-button">Adding a button<a class="headerlink" href="#adding-a-button" title="Permanent link">&para;</a></h2>
+<p>Add the <code>action_id</code> to <code>ACTIONS</code> in <code>src/constants.js</code>, render the button with
+that id, and register a handler with <code>reg.action(...)</code>. Modal callback ids go in
+<code>VIEWS</code> the same way.</p>
+<p>Buttons carry the incident key in <code>value</code>, as a bare string and nothing else. If the action mutates an incident, take a claim first:</p>
+<pre class="codehilite"><code class="language-js">const claim = await withClaim(ctx.incidents, key, slackUserId, async (rec) =&gt; {
+  // ... network work here. the claim is already held
+}, { allowExistingCase: true });
+
+if (!claim.ok) {
+  await reply.ephemeral(claimRefusal(claim));
+  return;
+}
+</code></pre>
+
+<p><code>withClaim</code> releases on success as well as on failure, so a body that doesn't happen to call <code>recordCase</code> doesn't leave the incident wedged for a minute.</p>
+<p>Then re-render with <code>renderIncident(client, ctx.incidents, key)</code>. It swallows Slack failures and returns <code>null</code>, so a stale message never fails the operation the analyst actually asked for.</p>
+<h2 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h2>
+<pre class="codehilite"><code class="language-bash">npm test
+npm run test:watch
+npm run test:coverage
+</code></pre>
+
+<p>Jest, <code>tests/**/*.test.js</code>. Nothing touches a real cluster or a real Slack workspace. The Elastic client is mocked and <code>tests/setup.js</code> pins the config the tests assume, so no <code>.env</code> is needed and forks can run the suite too.</p>
+<p><code>setupFiles</code> (not <code>setupFilesAfterEach</code>) matters here: <code>config/index.js</code> reads <code>process.env</code> at require time, and half the modules under test pull it in.</p>
+<p>CI runs <code>npm run check</code> then <code>npm test -- --ci</code> on every push to <code>main</code> and every PR.</p>
+<h2 id="lint-and-syntax-checks">Lint and syntax checks<a class="headerlink" href="#lint-and-syntax-checks" title="Permanent link">&para;</a></h2>
+<pre class="codehilite"><code class="language-bash">npm run check        # lint + syntax
+npm run lint
+npm run lint:fix
+</code></pre>
+
+<p><code>scripts/check-syntax.js</code> parses every <code>.js</code> file with <code>node --check</code>. It overlaps with eslint but has no dependencies, so it still runs when <code>node_modules</code> is missing or eslint itself is broken.</p>
+<p><code>docs/</code>, <code>coverage/</code> and <code>data/</code> are in <code>.eslintignore</code> - the first two ship bundled third-party JS that isn't ours to lint.</p>
+<h2 id="building-these-docs">Building these docs<a class="headerlink" href="#building-these-docs" title="Permanent link">&para;</a></h2>
+<pre class="codehilite"><code class="language-bash">pip install mkdocs
+mkdocs serve     # http://127.0.0.1:8000
+mkdocs build
+</code></pre>
+
+<p>Source is <code>docs_src/</code>, output is <code>docs/</code>. The built site is committed to the repo by <code>.github/workflows/docs.yml</code> on every push to <code>main</code>, which is what GitHub Pages serves. The workflow ignores changes under <code>docs/</code> so it doesn't trigger itself.</p>
+<p>Add a page by dropping the markdown in <code>docs_src/</code> and adding it to <code>nav</code> in <code>mkdocs.yml</code>. Then add it to the table of contents in <code>docs_src/index.md</code> too.</p>
               
             </div>
           </div><footer>
     <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
-        <a href="../about/" class="btn btn-neutral float-left" title="About elastibot-v2"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../reference/logging/" class="btn btn-neutral float-left" title="Logging and Errors"><span class="icon icon-circle-arrow-left"></span> Previous</a>
     </div>
 
   <hr/>
@@ -109,7 +272,7 @@
         </span>
     
     
-      <span><a href="../about/" style="color: #fcfcfc">&laquo; Previous</a></span>
+      <span><a href="../reference/logging/" style="color: #fcfcfc">&laquo; Previous</a></span>
     
     
   </span>

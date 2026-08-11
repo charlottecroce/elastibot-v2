@@ -8,6 +8,7 @@ const {
 const { caseCreatedBlocks, alertAddedBlocks } = require('../services/format');
 const { renderIncident } = require('../services/incidentRender');
 const { withClaim, claimRefusal } = require('../services/incidentClaim');
+const { mrkdwnLink } = require('../util/mrkdwn');
 const { ACTIONS, COMMANDS } = require('../constants');
 
 /*
@@ -32,6 +33,11 @@ const { ACTIONS, COMMANDS } = require('../constants');
  * half. The claim is taken synchronously before any network call, so the second
  * click loses instantly and gets told who is already on it. The button swap
  * then stops anyone reaching the click at all a second later
+ *
+ * Every case link below goes through mrkdwnLink. rec.caseLink is nullable -
+ * caseLinkForIncident returns null when no public base URL resolves - and
+ * Slack does not validate the url half of a mrkdwn link, so interpolating it
+ * directly renders the literal word "undefined" into the channel.
  */
 
 module.exports = function registerCase(reg) {
@@ -49,8 +55,9 @@ module.exports = function registerCase(reg) {
       if (existing?.caseId) {
         await reply.ephemeral(
           `Alert \`${alertId}\` is already part of an incident with case ` +
-            `<${existing.caseLink}|${existing.caseId}>. Use the *Add new alerts to case* ` +
-            'button on that message, or `/add_alert` if you want it somewhere else.'
+            `${mrkdwnLink(existing.caseLink, existing.caseId)}. ` +
+            'Use the *Add new alerts to case* button on that message, or `/add_alert` ' +
+            'if you want it somewhere else.'
         );
         return;
       }
@@ -158,7 +165,7 @@ module.exports = function registerCase(reg) {
       if (!pending.length) {
         // Two people clicked; the first one already attached them
         await reply.ephemeral(
-          `Everything on this incident is already on <${rec.caseLink}|${rec.caseId}>.`
+          `Everything on this incident is already on ${mrkdwnLink(rec.caseLink, rec.caseId)}.`
         );
         await renderIncident(client, ctx.incidents, key);
         return;
