@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>Slash Commands - elastibot-v2</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Slash Commands";
+        var mkdocs_page_input_path = "using/commands.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> elastibot-v2
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">Table of Contents</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Getting Started</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../getting-started/install/">Installation</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../getting-started/api-keys/">Elastic API Keys</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Using Elastibot</span></p>
+              <ul class="current">
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">Slash Commands</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#start">/start</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#case">/case</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#add_alert">/add_alert</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#stats">/stats</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#errors">Errors</a>
+    </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../incident-messages/">Incident Messages</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">How It Works</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/architecture/">Architecture</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/watchers/">The Watchers</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/grouping/">Alert Grouping</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/incidents/">Incidents</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/cases/">Cases</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/storage/">Storage</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Reference</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../reference/configuration/">Configuration</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../reference/logging/">Logging and Errors</a>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../../developer-guide/">Developer Guide</a>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">elastibot-v2</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Using Elastibot</li>
+      <li class="breadcrumb-item active">Slash Commands</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/charlottecroce/elastibot-v2/edit/main/docs_src/using/commands.md">Edit on elastibot-v2</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="slash-commands">Slash Commands<a class="headerlink" href="#slash-commands" title="Permanent link">&para;</a></h1>
+<h2 id="start"><code>/start</code><a class="headerlink" href="#start" title="Permanent link">&para;</a></h2>
+<pre class="codehilite"><code>/start [kibana_username]
+</code></pre>
+
+<p>Opens a modal to register your Elastic API key. The username argument is optional and only used to label the key and the confirmation message.</p>
+<p>Two ways to connect, chosen with a radio toggle in the modal:</p>
+<ul>
+<li><strong>paste my own key</strong>: you create the key in Kibana and paste the encoded
+  value in. Nothing is verified against Elastic at this point; the first command
+  you run is what finds out whether the key works.</li>
+<li><strong>create one for me</strong>: you paste an admin username and password and Elastibot
+  creates a correctly-scoped key for you. Only shown if your Slack ID is in
+  <code>AUTO_PROVISION_SLACK_IDS</code>.</li>
+</ul>
+<p>Either way the key is encrypted with AES-256-GCM before it goes to disk, and the confirmation arrives as a DM. If <code>ELASTIBOT_SECRET_KEY</code> isn't configured the DM says so, because a key sitting in plaintext on disk is something you should know about.</p>
+<p>Re-run it any time to rotate. See <a href="../../getting-started/api-keys/">Elastic API Keys</a>.</p>
+<h2 id="case"><code>/case</code><a class="headerlink" href="#case" title="Permanent link">&para;</a></h2>
+<pre class="codehilite"><code>/case &lt;alertID&gt;
+</code></pre>
+
+<p>Creates a case for that one alert, in the alert's own space, titled per the <a href="../../internals/cases/#case-naming">naming scheme</a>, and attaches the alert to it. Replies in-channel with the case ID, title and link.</p>
+<p>If the alert is already on a posted incident message, <code>/case</code> routes through the same claim the green button uses. And if that incident <em>already</em> has a case, the command refuses and points you at the existing one:</p>
+<blockquote>
+<p>Alert <code>abc123</code> is already part of an incident with case <code>case-1</code>. Use the <strong>Add
+new alerts to case</strong> button on that message, or <code>/add_alert</code> if you want it
+somewhere else.</p>
+</blockquote>
+<p>Note that this is the single-alert path. To file a whole burst into one case, use the green <strong>Create case</strong> button on the incident message. That one uses the message's own alert list.</p>
+<h2 id="add_alert"><code>/add_alert</code><a class="headerlink" href="#add_alert" title="Permanent link">&para;</a></h2>
+<pre class="codehilite"><code>/add_alert &lt;caseID&gt; &lt;alertID&gt;
+</code></pre>
+
+<p>Attaches an alert to a case that already exists. The case ID comes from Elastibot's creation message.</p>
+<p>This is also the manual fallback for the <strong>Add N new alerts to case</strong> button. Incident messages render one ready-to-run <code>/add_alert</code> command per pending alert, inside a code fence, precisely so you can copy them out when the button fails.</p>
+<p>Running one updates the incident message too, as long as the alert landed on the incident's <em>own</em> case. If you file an alert onto some unrelated case from last week, the incident message correctly goes on listing it as pending, because it still isn't on the case that message links to.</p>
+<h2 id="stats"><code>/stats</code><a class="headerlink" href="#stats" title="Permanent link">&para;</a></h2>
+<pre class="codehilite"><code>/stats [window] [filters] [share]
+</code></pre>
+
+<p>An aggregate view of the alerts index. Everything comes out of one <code>size: 0</code> aggregation search, so nothing pages through documents and a 30-day window costs about what an hour does.</p>
+<table>
+<thead>
+<tr>
+<th>Part</th>
+<th>Values</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>window</td>
+<td><code>24h</code>, <code>7d</code>, <code>2w</code>, <code>30m</code> - default <code>7d</code>, capped at <code>STATS_MAX_WINDOW_DAYS</code></td>
+</tr>
+<tr>
+<td>filters</td>
+<td><code>rule:"Rule name"</code>, <code>host:web-01</code>, <code>user:jsmith</code>, <code>space:soc</code></td>
+</tr>
+<tr>
+<td><code>share</code></td>
+<td>post the result in-channel instead of only to you</td>
+</tr>
+</tbody>
+</table>
+<p>Order doesn't matter, and quoted filter values keep their spaces. Tokens are parsed <em>before</em> the Elastic client is built, so junk input never reaches the cluster.</p>
+<pre class="codehilite"><code>/stats 30d space:soc
+/stats 24h rule:&quot;Suspicious PowerShell Download&quot; share
+/stats help
+</code></pre>
+
+<p>What comes back:</p>
+<ul>
+<li>headline counters: total alerts, distinct rules/hosts/users, alerts/day,
+  what percentage is attached to a case, average and max risk</li>
+<li>severity and workflow-status spread</li>
+<li><strong>top rules by volume</strong>, with per-rule host count and case rate</li>
+<li><strong>noisiest rules</strong>, ranked by alerts per <em>distinct host</em> rather than raw
+  volume, so 60 alerts on one box beats 30 spread over fifteen.</li>
+<li>top hosts, users, processes, and spaces</li>
+<li>hour-of-day as a sparkline, plus day-of-week, both bucketed in <code>STATS_TIMEZONE</code></li>
+</ul>
+<p>The reply is ephemeral unless you add <code>share</code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p><code>/stats</code> only reads aggregate numbers back from Elasticsearch. It never
+downloads alert documents. That's what makes it fast, and it's also the limit
+on what it can do. Anything needing per-alert analysis (exception monitoring,
+say) would mean pulling alerts into a local store first, which is a different
+piece of work.</p>
+</div>
+<h2 id="errors">Errors<a class="headerlink" href="#errors" title="Permanent link">&para;</a></h2>
+<p><strong>Expected failures</strong> (bad input, a missing alert, a rejected key) get a message that says what to do about it, and are logged at <code>info</code> because they aren't defects:</p>
+<pre class="codehilite"><code>:x: No alert found with ID `abc123` in `.alerts-security.alerts-*`.
+:x: Building statistics: Elastic rejected your API key (403). Re-run `/start`...
+:x: `banana` isn't a window I understand — try `24h`, `7d` or `2w`.
+</code></pre>
+
+<p>For commands with a usage string, that string gets appended.</p>
+<p><strong>Unexpected failures</strong> get a trace reference instead of the real message, because the real message is often an internal hostname or a stack trace:</p>
+<pre class="codehilite"><code>:x: Something went wrong on my end (ref `a1b2c3d4`). An admin can find the details in the logs.
+</code></pre>
+
+<p>That same <code>a1b2c3d4</code> is on every log line for that interaction, so a grepping to find where the error fired is easy.</p>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../../getting-started/api-keys/" class="btn btn-neutral float-left" title="Elastic API Keys"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../incident-messages/" class="btn btn-neutral float-right" title="Incident Messages">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/charlottecroce/elastibot-v2" class="fa fa-code-fork" style="color: #fcfcfc"> elastibot-v2</a>
+        </span>
+    
+    
+      <span><a href="../../getting-started/api-keys/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../incident-messages/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+      <script src="../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>Elastic API Keys - elastibot-v2</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Elastic API Keys";
+        var mkdocs_page_input_path = "getting-started/api-keys.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> elastibot-v2
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">Table of Contents</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Getting Started</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../install/">Installation</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">Elastic API Keys</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#why-every-analyst-needs-their-own">Why every analyst needs their own</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#creating-a-key-by-hand">Creating a key by hand</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#letting-elastibot-create-an-api-key">Letting Elastibot create an API key</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#the-service-key">The service key</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#rotating-and-revoking">Rotating and revoking</a>
+    </li>
+    </ul>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Using Elastibot</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../using/commands/">Slash Commands</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../using/incident-messages/">Incident Messages</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">How It Works</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/architecture/">Architecture</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/watchers/">The Watchers</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/grouping/">Alert Grouping</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/incidents/">Incidents</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/cases/">Cases</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/storage/">Storage</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Reference</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../reference/configuration/">Configuration</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../reference/logging/">Logging and Errors</a>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../../developer-guide/">Developer Guide</a>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">elastibot-v2</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Getting Started</li>
+      <li class="breadcrumb-item active">Elastic API Keys</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/charlottecroce/elastibot-v2/edit/main/docs_src/getting-started/api-keys.md">Edit on elastibot-v2</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="elastic-api-keys">Elastic API Keys<a class="headerlink" href="#elastic-api-keys" title="Permanent link">&para;</a></h1>
+<h2 id="why-every-analyst-needs-their-own">Why every analyst needs their own<a class="headerlink" href="#why-every-analyst-needs-their-own" title="Permanent link">&para;</a></h2>
+<p>Elastibot never acts as a single shared identity when it's doing something on an analyst's behalf. <code>/case</code>, <code>/add_alert</code>, <code>/stats</code> and both incident buttons all run under the API key of whoever ran the command, so the case in Kibana is attributed to that person and not to a bot account nobody can be held to.</p>
+<p>That's the whole reason <code>/start</code> exists. A command with <code>requireUser</code> set will refuse to do anything until you've registered:</p>
+<blockquote>
+<p>You need to connect first. Run <code>/start &lt;kibana_username&gt;</code> to register your
+Elastic API key.</p>
+</blockquote>
+<p>The watchers are not acting for anyone, so they use the service key from <code>ELASTIC_SERVICE_API_KEY</code>.</p>
+<h2 id="creating-a-key-by-hand">Creating a key by hand<a class="headerlink" href="#creating-a-key-by-hand" title="Permanent link">&para;</a></h2>
+<p>In Kibana Dev Tools:</p>
+<pre class="codehilite"><code>POST /_security/api_key
+{
+  &quot;name&quot;: &quot;elastibot-charlotte.croce&quot;
+}
+</code></pre>
+
+<p>Copy the <code>encoded</code> value out of the response - that base64 blob is what you paste into <code>/start</code>, not the <code>id</code> and not the <code>api_key</code> on their own.</p>
+<p>Then set the key's permissions under <strong>Stack Management → Security → API Keys</strong>. The JSON to use is in the <a href="https://github.com/charlottecroce/elastibot-v2/tree/main/api_permissions"><code>api_permissions/</code></a> directory:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>For</th>
+<th>Grants</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>elastibot_analyst.json</code></td>
+<td>analysts</td>
+<td>read + write on the security alerts indices, <code>feature_securitySolutionCases.all</code>, <code>feature_siem.read</code></td>
+</tr>
+<tr>
+<td><code>elastibot_service.json</code></td>
+<td>the watchers</td>
+<td>read-only on the alerts indices, <code>feature_securitySolutionCases.read</code></td>
+</tr>
+</tbody>
+</table>
+<p>The analyst descriptor needs <code>write</code> on the alerts indices because attaching an alert to a case updates the alert document (the case ids and the workflow status). Read alone will attach nothing.</p>
+<p><strong>Note:</strong> You can also define permissions directly into the the <code>POST /_security/api_key</code> request. A template can be found in the <a href="https://github.com/charlottecroce/elastibot-v2/tree/main/api_permissions"><code>api_permissions/</code></a> directory.</p>
+<h2 id="letting-elastibot-create-an-api-key">Letting Elastibot create an API key<a class="headerlink" href="#letting-elastibot-create-an-api-key" title="Permanent link">&para;</a></h2>
+<p><code>/start</code> can also call <code>POST /_security/api_key</code> itself, so an analyst never has to touch Dev Tools. Pick "create one for me" in the modal, paste an admin username and password, and Elastibot creates a key named
+<code>elastibot-&lt;username&gt;</code>, scoped with the exact same
+<code>api_permissions/elastibot_analyst.json</code> role descriptor an admin would have pasted by hand. Loading it from that one file is deliberate: the manual and automatic paths can't drift apart.</p>
+<p>The admin credential authenticates over HTTP Basic for that one request and is never stored, cached, or logged. It doesn't go into the client cache, which only ever holds API-key-authenticated clients.</p>
+<p>This option is off by default. <code>AUTO_PROVISION_SLACK_IDS</code> is a comma-separated list of Slack user IDs allowed to see it. Note that this is Slack-side gating only. Elasticsearch separately and always enforces that whatever credential gets pasted actually holds <code>manage_api_key</code> or <code>manage_own_api_key</code>. A credential without it is rejected no matter what the allowlist says.</p>
+<p>Because provisioning is a network round trip and Slack times out a view submission after a few seconds, the modal acks closed immediately and the result comes back as a DM.</p>
+<h2 id="the-service-key">The service key<a class="headerlink" href="#the-service-key" title="Permanent link">&para;</a></h2>
+<p><code>ELASTIC_SERVICE_API_KEY</code> is used for the alert and case polls and for space-name lookups. Give it <code>elastibot_service.json</code> - read-only. It never creates a case and never attaches an alert, so it doesn't need to be able to.</p>
+<p>If it isn't set, the watchers log a warning and don't start. Everything else still works, you just don't get channel notifications.</p>
+<h2 id="rotating-and-revoking">Rotating and revoking<a class="headerlink" href="#rotating-and-revoking" title="Permanent link">&para;</a></h2>
+<p>Re-running <code>/start</code> overwrites the stored key and invalidates the cached Elastic client built from the old one. Without that invalidation a revoked key would keep working until <code>ELASTIC_CLIENT_TTL_MS</code> expired it (15 minutes by default).</p>
+<p>Revoking a key in Kibana doesn't notify the bot. The analyst's next command fails with a 401/403, which Elastibot translates into "Elastic rejected your API key — re-run <code>/start</code>".</p>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../install/" class="btn btn-neutral float-left" title="Installation"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../../using/commands/" class="btn btn-neutral float-right" title="Slash Commands">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/charlottecroce/elastibot-v2" class="fa fa-code-fork" style="color: #fcfcfc"> elastibot-v2</a>
+        </span>
+    
+    
+      <span><a href="../install/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../../using/commands/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+      <script src="../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>Cases - elastibot-v2</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Cases";
+        var mkdocs_page_input_path = "internals/cases.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> elastibot-v2
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">Table of Contents</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Getting Started</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../getting-started/install/">Installation</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../getting-started/api-keys/">Elastic API Keys</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Using Elastibot</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../using/commands/">Slash Commands</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../using/incident-messages/">Incident Messages</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">How It Works</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../architecture/">Architecture</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../watchers/">The Watchers</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../grouping/">Alert Grouping</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../incidents/">Incidents</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">Cases</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#entry-points">Entry points</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#case-naming">Case naming</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#owner-and-space">Owner and space</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#attaching-in-per-rule-batches">Attaching in per-rule batches</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#alert-workflow-status">Alert workflow status</a>
+    </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../storage/">Storage</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Reference</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../reference/configuration/">Configuration</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../reference/logging/">Logging and Errors</a>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../../developer-guide/">Developer Guide</a>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">elastibot-v2</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">How It Works</li>
+      <li class="breadcrumb-item active">Cases</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/charlottecroce/elastibot-v2/edit/main/docs_src/internals/cases.md">Edit on elastibot-v2</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="cases">Cases<a class="headerlink" href="#cases" title="Permanent link">&para;</a></h1>
+<p>Case creation and alert attachment live in <code>src/services/caseService.js</code>. Everything here runs under the analyst's own API key, so the case in Kibana is attributed to them.</p>
+<h2 id="entry-points">Entry points<a class="headerlink" href="#entry-points" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Triggered by</th>
+<th>Does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>createCaseForAlert(apiKey, alertId)</code></td>
+<td><code>/case &lt;id&gt;</code></td>
+<td>one alert → one case</td>
+</tr>
+<tr>
+<td><code>createCaseForIds(apiKey, ids, {spaceId})</code></td>
+<td>green <strong>Create case</strong></td>
+<td>a whole incident → one case</td>
+</tr>
+<tr>
+<td><code>attachAlertsToCase(apiKey, {...})</code></td>
+<td><strong>Add N new alerts</strong></td>
+<td>pending ids → existing case</td>
+</tr>
+<tr>
+<td><code>addAlertToCase(apiKey, caseId, alertId)</code></td>
+<td><code>/add_alert</code></td>
+<td>one alert → any case</td>
+</tr>
+</tbody>
+</table>
+<p><code>createCaseForIds</code> deliberately does <strong>not</strong> re-run a user+host+time query. The incident record is already the authoritative list of what the Slack message
+shows, and a fresh query could disagree with it. An alert that aged out of the window, a stale cursor, whatever. It does filter fetched alerts to the expected
+<code>spaceId</code> as a sanity check, since an id resolving to a different space than the incident it came from would otherwise land in the wrong case.</p>
+<p>Resolving ids tolerates individual misses but not a systemic failure: a 400/404 on one id just means that alert is gone, anything else aborts the whole thing. If <em>nothing</em> resolves you get a user-facing error rather than an empty case.</p>
+<h2 id="case-naming">Case naming<a class="headerlink" href="#case-naming" title="Permanent link">&para;</a></h2>
+<pre class="codehilite"><code>PART1-MMDDYY-Rule Name
+</code></pre>
+
+<ul>
+<li><strong>part 1</strong> — the space's <em>display</em> name. One word → first three letters
+  (<code>default</code> → <code>DEF</code>). Two or more → initials (<code>Security Operations</code> → <code>SO</code>)</li>
+<li><strong>part 2</strong> — <code>MMDDYY</code></li>
+<li><strong>part 3</strong> — the most common rule in the burst, whole by default. Set
+  <code>CASE_TITLE_RULE_WORDS</code> to truncate to N words.</li>
+</ul>
+<pre class="codehilite"><code>SO-073026-Malware Detected
+DEF-070426-Suspicious PowerShell
+</code></pre>
+
+<p>Every date is rendered in an explicit IANA zone (<code>CASE_TITLE_TIMEZONE</code>, falling back to <code>STATS_TIMEZONE</code>, then <code>UTC</code>), so the same alert produces the same title whatever region the process happens to be running in.</p>
+<p>Cases are also tagged <code>elastibot</code> and with a month-year tag (<code>July 2026</code>) in the same zone.</p>
+<h2 id="owner-and-space">Owner and space<a class="headerlink" href="#owner-and-space" title="Permanent link">&para;</a></h2>
+<p>A case is created in the space its alerts came from, with an <em>owner</em>, the Kibana solution the case belongs to. The owner is derived from each alert's rule consumer:</p>
+<table>
+<thead>
+<tr>
+<th>consumer</th>
+<th>owner</th>
+<th>cases live at</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>siem</code></td>
+<td><code>securitySolution</code></td>
+<td><code>/app/security/cases</code></td>
+</tr>
+<tr>
+<td><code>logs</code>, <code>metrics</code>, <code>apm</code>, <code>uptime</code>, <code>slo</code>, …</td>
+<td><code>observability</code></td>
+<td><code>/app/observability/cases</code></td>
+</tr>
+<tr>
+<td>anything else</td>
+<td><code>DEFAULT_CASE_OWNER</code></td>
+<td><code>/app/management/insightsAndAlerting/cases</code></td>
+</tr>
+</tbody>
+</table>
+<p>When a burst spans owners, the most common one wins for the whole case, and it's then forced across every attach batch. When attaching to a case that <em>already</em> exists, each alert keeps its own owner instead. The case's owner was fixed at creation and isn't up for renegotiation.</p>
+<p>The owner is stored on the incident record so a "View case" link can be rebuilt from the record alone later. A wrong-solution path is still a link an analyst can follow.</p>
+<p>Links themselves are built in <code>src/services/kibanaLinks.js</code> from <code>KIBANA_PUBLIC_URL</code>, with <code>/s/&lt;space&gt;</code> prefixed for any non-default space.</p>
+<h2 id="attaching-in-per-rule-batches">Attaching in per-rule batches<a class="headerlink" href="#attaching-in-per-rule-batches" title="Permanent link">&para;</a></h2>
+<p>Kibana's comments API takes one rule per alert-comment but accepts an array of alert ids. So alerts get grouped by rule and posted one comment per rule, in
+<code>src/services/attachAlerts.js</code>.</p>
+<p>Failures are collected rather than thrown:</p>
+<ul>
+<li><strong>some batches failed</strong> → the case exists, the successful ids are recorded, and
+  a <code>⚠️</code> warning is appended to the Slack message. The incident's pending list
+  stays honest because only the ids that actually attached get marked attached.</li>
+<li><strong>every batch failed</strong> → user-facing error naming the case that <em>was</em> created,
+  so it isn't orphaned silently.</li>
+</ul>
+<p>Both cases are also logged, so there's a record after the Slack message scrolls
+away.</p>
+<p>Cases are created with <code>settings: { syncAlerts: true }</code>, which means the case status drives the status of every alert attached to it from then on. Closing the case closes its alerts.</p>
+<h2 id="alert-workflow-status">Alert workflow status<a class="headerlink" href="#alert-workflow-status" title="Permanent link">&para;</a></h2>
+<p>Case syncing only pushes status to alerts when the <strong>case</strong> status changes. So an alert joining an already in-progress or closed case would otherwise sit there open forever.</p>
+<p><code>addAlertToCase</code> reads the case first, and if its status isn't <code>open</code>, forces the matching workflow status on the alert once. After that the case's own syncing keeps it in line.</p>
+<pre class="codehilite"><code>open        → open
+in-progress → acknowledged
+closed      → closed
+</code></pre>
+
+<p>This is best-effort. If the status call fails, it's logged at <code>warn</code> and the attach still counts. The alert is on the case, it just didn't inherit the status. Failing the whole operation over that would be worse.</p>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../incidents/" class="btn btn-neutral float-left" title="Incidents"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../storage/" class="btn btn-neutral float-right" title="Storage">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/charlottecroce/elastibot-v2" class="fa fa-code-fork" style="color: #fcfcfc"> elastibot-v2</a>
+        </span>
+    
+    
+      <span><a href="../incidents/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../storage/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+      <script src="../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

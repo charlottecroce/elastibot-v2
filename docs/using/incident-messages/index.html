@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>Incident Messages - elastibot-v2</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Incident Messages";
+        var mkdocs_page_input_path = "using/incident-messages.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> elastibot-v2
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">Table of Contents</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Getting Started</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../getting-started/install/">Installation</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../getting-started/api-keys/">Elastic API Keys</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Using Elastibot</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../commands/">Slash Commands</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">Incident Messages</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#what-the-message-shows">What the message shows</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#incident-states">Incident states</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#two-analysts-clicking-the-button-at-the-same-time">Two analysts clicking the button at the same time</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#incident-reaping">Incident Reaping</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#new-case-notifications">New case notifications</a>
+    </li>
+    </ul>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">How It Works</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/architecture/">Architecture</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/watchers/">The Watchers</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/grouping/">Alert Grouping</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/incidents/">Incidents</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/cases/">Cases</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/storage/">Storage</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Reference</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../reference/configuration/">Configuration</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../reference/logging/">Logging and Errors</a>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../../developer-guide/">Developer Guide</a>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">elastibot-v2</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Using Elastibot</li>
+      <li class="breadcrumb-item active">Incident Messages</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/charlottecroce/elastibot-v2/edit/main/docs_src/using/incident-messages.md">Edit on elastibot-v2</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="incident-messages">Incident Messages<a class="headerlink" href="#incident-messages" title="Permanent link">&para;</a></h1>
+<p>When the alert watcher finds new alerts it collapses related ones into an <em>incident</em> and posts one message per incident, not one per alert. That message is then re-rendered in place as more alerts arrive and as a case gets made, so a message you scroll back to two hours later shows current state rather than state at post time.</p>
+<h2 id="what-the-message-shows">What the message shows<a class="headerlink" href="#what-the-message-shows" title="Permanent link">&para;</a></h2>
+<p>A burst:</p>
+<pre class="codehilite"><code>🚨 3 related alerts — `jsmith` (+SYSTEM) on host `web-01`
+
+Top severity: high · Space: Security Operations
+Window: 2026-07-30T12:00:00Z → 2026-07-30T12:45:00Z
+Rules: Malware Detected ×2, Beaconing ×1
+
+[ Create case (3 alerts) ]
+</code></pre>
+
+<p>A single alert gets a different header (<code>New alert — &lt;rule&gt;</code>) and its metadata line carries the alert ID, host and user instead of a time window.</p>
+<p>The identity line shows the machine accounts that grouping folded in, rather than hiding them. <code>`jsmith` (+SYSTEM, svc_backup)</code>.</p>
+<h2 id="incident-states">Incident states<a class="headerlink" href="#incident-states" title="Permanent link">&para;</a></h2>
+<p>The same message renders one of three ways depending on where the incident is:</p>
+<p><strong>1. No case yet.</strong> A green <strong>Create case</strong> button. Clicking it files every alert
+on the message into one case.</p>
+<p><strong>2. Case exists, nothing outstanding.</strong> No buttons at all, as there's genuinely
+nothing left to do to it from Slack. A context line names the case, links it, and
+says how much of the incident is on it:</p>
+<pre class="codehilite"><code>📂 SO-073026-Malware Detected — 3 of 3 alerts attached
+</code></pre>
+
+<p><strong>3. Case exists, new alerts have arrived since.</strong> The case line, plus a section listing what isn't attached yet, plus a green <strong>Add N new alerts to case</strong> button:</p>
+<pre class="codehilite"><code>📂 SO-073026-Malware Detected — 1 of 3 alerts attached
+─────────────────────────────────────────────
+🆕 2 new alerts since the case was created
+Beaconing ×1, Malware Detected ×1
+
+    /add_alert case-1 a2
+    /add_alert case-1 a3
+
+[ Add 2 new alerts to case ]
+</code></pre>
+
+<p>Past ten pending alerts the list is truncated to <code>+N more not listed — use the button</code>, since at that point it's just noise.</p>
+<h2 id="two-analysts-clicking-the-button-at-the-same-time">Two analysts clicking the button at the same time<a class="headerlink" href="#two-analysts-clicking-the-button-at-the-same-time" title="Permanent link">&para;</a></h2>
+<p>Between the click and the message update there are two or three Elastic round trips (~1-3 seconds) and for that whole window the button is still green on everyone else's screen. An incident <em>claim</em> is taken synchronously before any network call, so the second click loses instantly and gets told who's already on it:</p>
+<blockquote>
+<p>Someone else is creating a case for this incident right now. Give it a second
+and refresh.</p>
+</blockquote>
+<p>While a claim is held the message shows <code>⏳ @jsmith is creating a case…</code>, which is purely cosmetic (the claim is what actually blocks the duplicate) but it stops the second analyst wondering why nothing happened.</p>
+<p>The <strong>Add N new alerts</strong> button takes the same claim because Kibana's attach isn't idempotent, so two clicks would double-attach.</p>
+<p>More detail in <a href="../../internals/incidents/#claims">Incidents</a>.</p>
+<h2 id="incident-reaping">Incident Reaping<a class="headerlink" href="#incident-reaping" title="Permanent link">&para;</a></h2>
+<p>An incident is reaped after <code>INCIDENT_IDLE_MS</code> with no new alerts (8 hours by default, roughly a shift) or <code>INCIDENT_MAX_LIFETIME_MS</code> regardless of activity (24 hours).</p>
+<p>Reaping doesn't delete the Slack message. It stays in the channel with whatever buttons it last had, and clicking one tells you the incident has closed out:</p>
+<blockquote>
+<p>That incident has closed out (no new alerts for 8h) and is no longer tracked.
+Use <code>/add_alert &lt;caseID&gt; &lt;alertID&gt;</code> for the alert IDs on the message.</p>
+</blockquote>
+<p>The next alert on that host starts a fresh incident with a fresh green button. That's the intended behaviour. An incident from last night shouldn't absorb this morning's alerts.</p>
+<h2 id="new-case-notifications">New case notifications<a class="headerlink" href="#new-case-notifications" title="Permanent link">&para;</a></h2>
+<p>Separately from all of the above, the case watcher posts a short message for every case created in a watched space:</p>
+<pre class="codehilite"><code>📂 New case — SO-073026-Malware Detected
+Case ID: `case-1` · Space: Security Operations · Created by: jsmith
+</code></pre>
+
+<p>These are informational and have no buttons. Configure which spaces get watched with <code>WATCH_CASE_SPACES</code>.</p>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../commands/" class="btn btn-neutral float-left" title="Slash Commands"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../../internals/architecture/" class="btn btn-neutral float-right" title="Architecture">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/charlottecroce/elastibot-v2" class="fa fa-code-fork" style="color: #fcfcfc"> elastibot-v2</a>
+        </span>
+    
+    
+      <span><a href="../commands/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../../internals/architecture/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+      <script src="../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>
