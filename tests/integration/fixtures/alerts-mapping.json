@@ -1,0 +1,32 @@
+{
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0,
+      "refresh_interval": "200ms"
+    },
+    "mappings": {
+      "dynamic": "strict",
+      "properties": {
+        "@timestamp": { "type": "date" },
+        "kibana.alert.@timestamp": { "type": "date" },
+        "kibana.space_ids": { "type": "keyword" },
+        "kibana.alert.uuid": { "type": "keyword" },
+        "kibana.alert.rule.name": { "type": "keyword" },
+        "kibana.alert.rule.uuid": { "type": "keyword" },
+        "kibana.alert.rule.consumer": { "type": "keyword" },
+        "kibana.alert.rule.rule_type_id": { "type": "keyword" },
+        "kibana.alert.severity": { "type": "keyword" },
+        "kibana.alert.risk_score": { "type": "float" },
+        "kibana.alert.workflow_status": { "type": "keyword" },
+        "kibana.alert.reason": { "type": "text" },
+        "host.name": { "type": "keyword" },
+        "host.os.family": { "type": "keyword" },
+        "user.name": { "type": "keyword" },
+        "user.domain": { "type": "keyword" },
+        "process.name": { "type": "keyword" },
+        "process.executable": { "type": "keyword" },
+        "event.action": { "type": "keyword" },
+        "event.category": { "type": "keyword" }
+      }
+    }
+  }

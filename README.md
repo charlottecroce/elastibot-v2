@@ -4,6 +4,8 @@
 
 A Slack bot (Node.js / Bolt) that helps security analysts turn Elastic alerts into Kibana cases without leaving Slack, and pushes new alerts and cases into designated channels.
 
+**For full documentation, visit https://elastibot.charlotte.sh**
+
 ## Commands
 
 | Command | What it does |
@@ -29,11 +31,10 @@ New alerts also arrive in channel with a **Create case** button (same as `/case`
   3. Install App > copy the Bot User OAuth Token  >  SLACK_BOT_TOKEN (xoxb-...).
 
    ```bash
-   cp .env.example .env
-   # fill in Slack + Elastic values; set ELASTIBOT_SECRET_KEY to a long random string
-
-   openssl rand -hex 16   # this will generate a 32-char random string
+   cp elastibot.example.yml elastibot.yml
+   chmod 600 elastibot.yml
    ```
+   then fill in Slack + Elastic values; set ELASTIBOT_SECRET_KEY to a long random string
 
 3. **Install & run**
    ```bash
@@ -42,16 +43,6 @@ New alerts also arrive in channel with a **Create case** button (same as `/case`
    ```
 
 Runs in **Socket Mode** by default (no public URL needed - good for an internal deployment). Set `SLACK_SOCKET_MODE=false` to run an HTTP server on `PORT`.
-
-## Tests
-
-```bash
-npm test              # jest
-npm run test:watch
-npm run test:coverage
-```
-
-Nothing in the suite touches a real cluster or a real Slack workspace: the Elastic client is mocked and [tests/setup.js](tests/setup.js) pins the config the tests assume, so no `.env` is needed.`.github/workflows/tests.yml](.github/workflows/tests.yml) runs the same command on Node 18/20/22 for every push to `main` and every PR.
 
 ## Creating API Keys
 
@@ -68,4 +59,4 @@ And copy the base64 encoded value.
 
 Then edit the permissions JSON in Stack Management > Security > Api Keys. The permissions JSONs to use are in the [api_permissions](api_permissions) directory. 
 
-There is also an option to auto-create API keys via admins credentials. To configure this, add authorized user's SlackIDs to .env and you'll be able to enter elastic admin credentials to create an analyst API key.
+There is also an option to auto-create API keys via admins credentials. To configure this, add authorized user's SlackIDs to elastibot.yml and you'll be able to enter elastic admin credentials to create an analyst API key.

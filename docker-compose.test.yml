@@ -1,0 +1,105 @@
+# Integration test stack. Driven by scripts/test-stack.sh.
+#
+#   npm run stack:up             Elasticsearch + Kibana (the default now)
+#   npm run stack:up:no-kibana   Elasticsearch only, if you don't need Cases/Spaces
+#   npm run test:live            bring the stack up, then run the integration tests
+#   npm run stack:down           stop, keep the data volume
+#   npm run stack:reset          destroy the volume and start clean
+#
+# Ports default to 9201/5602 rather than 9200/5601 on purpose: a stack you
+# already have running for development should never be mistaken for this one
+#
+# To move to a different Elastic version, change ELASTIC_STACK_VERSION in
+# .env.test (or export it) and run `npm run stack:reset`.
+
+name: elastibot-test
+
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_STACK_VERSION:-8.15.3}
+    environment:
+      - discovery.type=single-node
+      - ELASTIC_PASSWORD=${ELASTIC_TEST_PASSWORD:-elastibot-test}
+      # Security ON, TLS off. Security has to be on or there are no API keys to
+      # authenticate with, and API-key auth is half of what these tests exist to
+      # check. TLS is off because certificate plumbing in CI buys nothing here
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+      # No ML, no monitoring: shaves a good chunk off a cold start
+      - xpack.ml.enabled=false
+      - xpack.monitoring.collection.enabled=false
+      - action.destructive_requires_name=false
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+      - bootstrap.memory_lock=false
+      - cluster.routing.allocation.disk.threshold_enabled=false
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    ports:
+      - '${ELASTIC_TEST_ES_PORT:-9201}:9200'
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      # yellow is the correct target: single-node means replicas stay
+      # unassigned forever, so waiting for green waits for something that
+      # will never happen
+      test:
+        - CMD-SHELL
+        - >-
+          curl -sf -u "elastic:${ELASTIC_TEST_PASSWORD:-elastibot-test}"
+          "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s"
+          >/dev/null
+      interval: 5s
+      timeout: 10s
+      retries: 40
+      start_period: 20s
+
+  # Sets the kibana_system password so Kibana can connect. Only runs under the
+  # kibana profile, and exits as soon as it's done
+  kibana-setup:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_STACK_VERSION:-8.15.3}
+    profiles: [kibana]
+    depends_on:
+      elasticsearch: { condition: service_healthy }
+    command: >-
+      curl -sf -X POST -u "elastic:${ELASTIC_TEST_PASSWORD:-elastibot-test}"
+      -H "Content-Type: application/json"
+      "http://elasticsearch:9200/_security/user/kibana_system/_password"
+      -d '{"password":"${ELASTIC_TEST_PASSWORD:-elastibot-test}"}'
+    restart: on-failure
+
+  # Kibana is the slow, heavy half of the stack - a cold start is a minute or more.
+  kibana:
+    image: docker.elastic.co/kibana/kibana:${ELASTIC_STACK_VERSION:-8.15.3}
+    profiles: [kibana]
+    depends_on:
+      elasticsearch: { condition: service_healthy }
+      kibana-setup: { condition: service_completed_successfully }
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${ELASTIC_TEST_PASSWORD:-elastibot-test}
+      # Must be 32+ chars or Kibana refuses to start
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=elastibot-test-encryption-key-000
+      - XPACK_REPORTING_ENABLED=false
+      - MONITORING_UI_ENABLED=false
+      - TELEMETRY_ENABLED=false
+    ports:
+      - '${ELASTIC_TEST_KIBANA_PORT:-5602}:5601'
+    volumes:
+      - kibanadata:/usr/share/kibana/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'curl -sf http://localhost:5601/api/status | grep -q ''"level":"available"'''
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      start_period: 60s
+
+volumes:
+  # Named, so `stack:down` keeps them and the next `stack:up` is a warm start.
+  # `stack:reset` is the one that throws them away
+  esdata:
+  kibanadata:

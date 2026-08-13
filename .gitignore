@@ -1,7 +1,11 @@
-# Secrets
+# Deployment config. Holds every secret, so this must never be committed.
+elastibot.yml
+elastibot.yaml
+!elastibot.example.yml
+
+# Elastibot no longer reads .env, but kept here so an old one from a pre-YAML checkout can't be committed by accident
 .env
 .env.*
-!.env.example
 
 # Local persistence
 data/
