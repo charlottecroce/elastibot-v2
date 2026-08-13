@@ -66,9 +66,20 @@ const fakeStack = {
  * ------------------------------------------------------------------------ */
 const indices = {
   prodPattern: '.alerts-security.alerts-*',
-  testPattern: 'test-alerts-security-*',
-  writeIndex: 'test-alerts-security-000001',
+  testPrefix: 'test-alerts-security-',
 };
+
+indices.testPattern = `${indices.testPrefix}*`;
+
+/**
+ * Backing index n, in the six-digit form ILM rollover produces. The rollover
+ * tests in elasticClient.test.js need more than one, and spelling
+ * 'test-alerts-security-000002' into a test is how the pattern and the indices
+ * it is supposed to match drift apart.
+ */
+indices.backingIndex = (n) => `${indices.testPrefix}${String(n).padStart(6, '0')}`;
+
+indices.writeIndex = indices.backingIndex(1);
 
 /* ---------------------------------------------------------------------------
  * Placeholder credentials
@@ -78,7 +89,7 @@ const indices = {
  * integration suite boots the real config path and would otherwise fail
  * validation before reaching a single test.
  *
- * The unit suite deliberately does NOT set these. Several tests assert on the
+ * The unit suite deliberately does NOT set these - several tests assert on the
  * unconfigured path. Adding them here would break those quietly.
  * ------------------------------------------------------------------------ */
 const credentials = {

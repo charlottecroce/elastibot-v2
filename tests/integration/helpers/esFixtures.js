@@ -15,14 +15,14 @@
 
 const axios = require('axios');
 const path = require('path');
-const env = require('../env');
+const { stack, indices, fixtures } = require('../../testenv');
 
 const MAPPING = require('../fixtures/alerts-mapping.json');
 
 function adminClient() {
   return axios.create({
-    baseURL: env.esUrl,
-    auth: { username: env.username, password: env.password },
+    baseURL: stack.esUrl,
+    auth: { username: stack.username, password: stack.password },
     timeout: 20000,
   });
 }
@@ -30,7 +30,7 @@ function adminClient() {
 const es = adminClient();
 
 /** Drop and recreate the write index. Each test file starts from nothing */
-async function resetAlertsIndex(index = env.writeIndex) {
+async function resetAlertsIndex(index = indices.writeIndex) {
   await es.delete(`/${index}`, {
     params: { ignore_unavailable: true },
     validateStatus: (s) => s < 400 || s === 404,
@@ -41,7 +41,7 @@ async function resetAlertsIndex(index = env.writeIndex) {
 
 /** Delete every index under the test pattern */
 async function deleteAllTestIndices() {
-  await es.delete(`/${encodeURIComponent(env.alertsIndex)}`, {
+  await es.delete(`/${encodeURIComponent(indices.testPattern)}`, {
     params: { ignore_unavailable: true, allow_no_indices: true },
     validateStatus: (s) => s < 400 || s === 404,
   });
@@ -52,35 +52,50 @@ let seq = 0;
 /**
  * One alert document, in the shape src/elastic.js#toAlert expects.
  *
- * Both timestamps default to the same instant but are separate arguments,
- * because they are separate fields with separate jobs: `timestamp` is detection
- * time (what grouping and display use) and `ingested` is @timestamp, the field
- * the watcher cursor ranges and sorts on. Tests that don't care can ignore
- * both; the ones about paging very much care.
+ * Every field except the timestamps defaults from testenv.fixtures.alert, so a
+ * test states only what it is actually asserting on. The overrides are merged
+ * before the destructure rather than being parameter defaults, which is what
+ * lets the defaults live somewhere other than this signature.
+ *
+ * Both timestamps default to the same instant but stay separate, because they
+ * are separate fields with separate jobs: `timestamp` is detection time (what
+ * grouping and display use) and `ingested` is @timestamp, the field the watcher
+ * cursor ranges and sorts on. Tests that don't care can ignore both; the ones
+ * about paging very much care.
+ *
+ * @param {object} [overrides] any of fixtures.alert, plus id/timestamp/ingested
  */
-function makeAlert({
-  id,
-  timestamp = new Date().toISOString(),
-  ingested = timestamp,
-  spaceId = 'default',
-  rule = 'Malware Detected',
-  ruleUuid = 'rule-uuid-a',
-  consumer = 'siem',
-  severity = 'high',
-  riskScore = 47,
-  host = 'WEB-01',
-  user = 'jsmith',
-  process = 'powershell.exe',
-  action = 'process_start',
-} = {}) {
+function makeAlert(overrides = {}) {
+  const merged = { ...fixtures.alert, ...overrides };
+
+  const {
+    id,
+    timestamp = new Date().toISOString(),
+    spaceId,
+    rule,
+    ruleUuid,
+    consumer,
+    severity,
+    riskScore,
+    host,
+    user,
+    // `process` would shadow the global inside this function
+    process: processName,
+    action,
+  } = merged;
+
+  const ingested = merged.ingested ?? timestamp;
+
   seq += 1;
+  const uuid = id || `alert-${seq}`;
+
   return {
-    _id: id || `alert-${seq}`,
+    _id: uuid,
     doc: {
       '@timestamp': ingested,
       'kibana.alert.@timestamp': timestamp,
       'kibana.space_ids': [spaceId],
-      'kibana.alert.uuid': id || `alert-${seq}`,
+      'kibana.alert.uuid': uuid,
       'kibana.alert.rule.name': rule,
       'kibana.alert.rule.uuid': ruleUuid,
       'kibana.alert.rule.consumer': consumer,
@@ -90,7 +105,7 @@ function makeAlert({
       'kibana.alert.workflow_status': 'open',
       'host.name': host,
       'user.name': user,
-      'process.name': process,
+      'process.name': processName,
       'event.action': action,
       'event.category': 'process',
     },
@@ -104,10 +119,13 @@ function makeAlert({
  * retry loop against the near-real-time gap, and the first flaky CI run would
  * be blamed on the query rather than on the missing refresh.
  */
-async function indexAlerts(alerts, index = env.writeIndex) {
+async function indexAlerts(alerts, index = indices.writeIndex) {
   const body =
     alerts
-      .map(({ _id, doc }) => `${JSON.stringify({ index: { _index: index, _id } })}\n${JSON.stringify(doc)}`)
+      .map(
+        ({ _id, doc }) =>
+          `${JSON.stringify({ index: { _index: index, _id } })}\n${JSON.stringify(doc)}`
+      )
       .join('\n') + '\n';
 
   const { data } = await es.post('/_bulk', body, {

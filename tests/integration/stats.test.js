@@ -118,7 +118,10 @@ describe('/stats (live)', () => {
   });
 
   /*
-   * Everything below here is about the numbers /stats actually prints.
+   * Everything below here is about the numbers /stats actually prints. The
+   * suite previously seeded a careful, lopsided spread and then asserted only
+   * the total - which passes just as well if every ranking comes back reversed,
+   * or if shapeStats reads `doc_count` off the wrong nesting level.
    */
   describe('the numbers it renders', () => {
     let stats;
@@ -209,15 +212,37 @@ describe('/stats (live)', () => {
     });
 
     /*
-     * foldActivity turns the date_histogram into the sparkline. Buckets are
-     * where documents get silently dropped - an interval that doesn't span the
-     * window, or a fold that skips empty buckets and then misaligns.
+     * foldActivity turns the hourly date_histogram into two independent views
+     * of the same buckets - hour-of-day and day-of-week - by string-slicing
+     * key_as_string ("yyyy-MM-dd'T'HH"). Both must total the window. A slice
+     * offset that is wrong by one, or a format the query stops emitting, shows
+     * up as one of the two folds being short while the other still looks fine.
      */
-    test('the activity histogram accounts for every alert in the window', () => {
-      expect(stats.activity.length).toBeGreaterThan(0);
+    test('both activity folds account for every alert in the window', () => {
+      const { byHour, byWeekday, peakDay, perDay } = stats.activity;
 
-      const counted = stats.activity.reduce((sum, b) => sum + (b.count ?? b.doc_count ?? 0), 0);
-      expect(counted).toBe(SEEDED.total);
+      expect(byHour).toHaveLength(24);
+      expect(byWeekday).toHaveLength(7);
+
+      expect(byHour.reduce((a, b) => a + b, 0)).toBe(SEEDED.total);
+      expect(byWeekday.reduce((a, b) => a + b, 0)).toBe(SEEDED.total);
+
+      // A 24h window is exactly one day, so perDay is the total. This is the
+      // arithmetic that goes wrong when windowMs and the histogram disagree
+      expect(perDay).toBe(SEEDED.total);
+
+      // Everything is seeded within about three hours, but a run that straddles
+      // midnight in STATS_TIMEZONE splits it across two dates
+      expect(peakDay.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(peakDay.count).toBeGreaterThan(0);
+      expect(peakDay.count).toBeLessThanOrEqual(SEEDED.total);
+    });
+
+    test('busiest and quietest hour index into the fold they came from', () => {
+      const { byHour, busiestHour, quietestHour } = stats.activity;
+
+      expect(byHour[busiestHour]).toBe(Math.max(...byHour));
+      expect(byHour[quietestHour]).toBe(Math.min(...byHour));
     });
   });
 

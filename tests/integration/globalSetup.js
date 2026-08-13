@@ -7,23 +7,28 @@
  *      A wall of ECONNREFUSED stack traces is a bad way to learn you forgot
  *      to start the stack.
  *   2. Delete anything left over from a previous run. The stack is reused
- *      between runs on purpose, so leftovers are the normal case, and 
- *      /stats counts every document under the test index pattern, so leftovers 
+ *      between runs on purpose, so leftovers are the normal case, and
+ *      /stats counts every document under the test index pattern, so leftovers
  *      would make its assertions drift.
  *   3. Mint the API key the tests authenticate with, and hand it to the
  *      workers through the environment.
+ *
+ * Note the ordering constraint this file creates: it runs BEFORE the workers
+ * fork, and therefore before tests/integration/setup.js. That is why
+ * testenv.integrationEnv() is a function - it reads ELASTIBOT_TEST_API_KEY,
+ * which does not exist until step 3 below.
  */
 
 const axios = require('axios');
-const env = require('./env');
+const { stack, indices } = require('../testenv');
 
 const ATTEMPTS = 30;
 const GAP_MS = 2000;
 
 const admin = () =>
   axios.create({
-    baseURL: env.esUrl,
-    auth: { username: env.username, password: env.password },
+    baseURL: stack.esUrl,
+    auth: { username: stack.username, password: stack.password },
     timeout: 10000,
     validateStatus: () => true,
   });
@@ -40,7 +45,7 @@ async function waitForCluster(client) {
       if (res.status === 200) return res.data;
       if (res.status === 401) {
         throw new Error(
-          `Elasticsearch at ${env.esUrl} rejected elastic/<ELASTIC_TEST_PASSWORD>. ` +
+          `Elasticsearch at ${stack.esUrl} rejected elastic/<ELASTIC_TEST_PASSWORD>. ` +
             'If you changed the password, run `npm run stack:reset` - the old one is ' +
             'baked into the data volume.'
         );
@@ -54,7 +59,7 @@ async function waitForCluster(client) {
   }
 
   throw new Error(
-    `No Elasticsearch at ${env.esUrl} after ${(ATTEMPTS * GAP_MS) / 1000}s (last: ${last}).\n\n` +
+    `No Elasticsearch at ${stack.esUrl} after ${(ATTEMPTS * GAP_MS) / 1000}s (last: ${last}).\n\n` +
       '  npm run stack:up          start it\n' +
       '  npm run test:live         start it and run these tests\n' +
       '  npm run stack:status      see what is actually running\n\n' +
@@ -64,7 +69,7 @@ async function waitForCluster(client) {
 
 async function probeKibana() {
   try {
-    const res = await axios.get(`${env.kibanaUrl}/api/status`, {
+    const res = await axios.get(`${stack.kibanaUrl}/api/status`, {
       timeout: 5000,
       validateStatus: () => true,
     });
@@ -82,12 +87,12 @@ module.exports = async () => {
   const version = info.data?.version?.number || 'unknown';
 
   // Leftovers from the last run. The stack is reused; the data is not
-  const wipe = await client.delete(`/${encodeURIComponent(env.alertsIndex)}`, {
+  const wipe = await client.delete(`/${encodeURIComponent(indices.testPattern)}`, {
     params: { ignore_unavailable: true, allow_no_indices: true },
   });
   if (wipe.status >= 400 && wipe.status !== 404) {
     throw new Error(
-      `Could not clear ${env.alertsIndex}: HTTP ${wipe.status} ` +
+      `Could not clear ${indices.testPattern}: HTTP ${wipe.status} ` +
         `${JSON.stringify(wipe.data)}`
     );
   }
@@ -114,7 +119,7 @@ module.exports = async () => {
 
   // eslint-disable-next-line no-console
   console.log(
-    `\n  elasticsearch ${version} at ${env.esUrl} (${health.status})` +
-      `\n  kibana        ${kibanaUp ? env.kibanaUrl : 'not running - those tests will skip'}\n`
+    `\n  elasticsearch ${version} at ${stack.esUrl} (${health.status})` +
+      `\n  kibana        ${kibanaUp ? stack.kibanaUrl : 'not running - those tests will skip'}\n`
   );
 };

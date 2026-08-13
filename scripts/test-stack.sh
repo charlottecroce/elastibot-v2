@@ -26,29 +26,48 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 COMPOSE_FILE=docker-compose.test.yml
 PROJECT=elastibot-test
 
-# Defaults are duplicated in docker-compose.test.yml and in
-# tests/integration/env.js. Three copies, but each of the three has to work
-# with nothing else loaded, and they're checked against each other by
-# `status` below
-ES_PORT="${ELASTIC_TEST_ES_PORT:-9201}"
-KIBANA_PORT="${ELASTIC_TEST_KIBANA_PORT:-5602}"
-PASSWORD="${ELASTIC_TEST_PASSWORD:-elastibot-test}"
-ES_URL="http://localhost:${ES_PORT}"
-KIBANA_URL="http://localhost:${KIBANA_PORT}"
+log()  { printf '\033[36m[stack]\033[0m %s\n' "$*" >&2; }
+err()  { printf '\033[31m[stack]\033[0m %s\n' "$*" >&2; }
+die()  { err "$*"; exit 1; }
 
-# .env.test is optional - somewhere to pin ELASTIC_STACK_VERSION without
-# exporting it in every shell
+# .env.test is optional - somewhere to pin ELASTIC_STACK_VERSION (or a port)
+# without exporting it in every shell. Sourced FIRST so that node sees it:
+# previously it was read after the ports had already been resolved, which meant
+# setting a port in .env.test silently did nothing.
 [ -f .env.test ] && set -a && . ./.env.test && set +a
 
-VERSION="${ELASTIC_STACK_VERSION:-8.15.3}"
+# Ports, password and stack version come from tests/testenv.js, which is also
+# what the integration suite reads
+#
+# docker-compose.test.yml picks these up from the environment exported below;
+# the `:-9201` style fallbacks it carries are a backstop for running compose
+# directly, without this script.
+#
+# testenv.js honours the same ELASTIC_TEST_* overrides, so exporting
+# ELASTIC_TEST_ES_PORT=9301 still works and now reaches the script and the
+# suite from a single read.
+command -v node >/dev/null 2>&1 \
+  || die "node is not installed or not on PATH (needed to read tests/testenv.js)"
+
+eval "$(node -e '
+  const t = require("./tests/testenv");
+  const out = {
+    ES_PORT: t.stack.esPort,
+    KIBANA_PORT: t.stack.kibanaPort,
+    PASSWORD: t.stack.password,
+    VERSION: t.stack.stackVersion,
+    ES_URL: t.stack.esUrl,
+    KIBANA_URL: t.stack.kibanaUrl,
+  };
+  for (const [k, v] of Object.entries(out)) {
+    console.log(`${k}=${JSON.stringify(String(v))}`);
+  }
+')"
+
 export ELASTIC_STACK_VERSION="$VERSION"
 export ELASTIC_TEST_ES_PORT="$ES_PORT"
 export ELASTIC_TEST_KIBANA_PORT="$KIBANA_PORT"
 export ELASTIC_TEST_PASSWORD="$PASSWORD"
-
-log()  { printf '\033[36m[stack]\033[0m %s\n' "$*" >&2; }
-err()  { printf '\033[31m[stack]\033[0m %s\n' "$*" >&2; }
-die()  { err "$*"; exit 1; }
 
 command -v docker >/dev/null 2>&1 || die "docker is not installed or not on PATH"
 docker compose version >/dev/null 2>&1 \
