@@ -227,7 +227,7 @@ function validateConfig(config, { throwOnError = true } = {}) {
     log.fatal('configuration is invalid', { problems: errors.length });
     throw new ConfigError(
       `Configuration is invalid:\n  - ${errors.join('\n  - ')}\n\n` +
-        'Copy .env.example to .env and fill it in.'
+        'Copy elastibot.yml.example to elastibot.yml and fill it in.'
     );
   }
 

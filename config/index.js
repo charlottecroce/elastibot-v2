@@ -1,118 +1,171 @@
 'use strict';
 
 /*
- * config/index.js - Edit this file to configure your deployment
- * See .env.example for the secrets that must be set in `.env`
+ * config/index.js - resolves every setting. Edit `elastibot.yml`, not this file.
+ *
+ * Each setting below is one `s(yamlKey, ENV_VAR, coercer, default)` call, and
+ * that line is the single source of truth for its name, its type and its
+ * default. Resolution order is YAML > env var > default; see config/loader.js.
+ *
+ * elastibot.yml holds everything, secrets included. loader.js checks the
+ * mode at boot and complains if it's group- or world-readable.
+ *
+ * The env var on each line is still honored, for containers and orchestrators
+ * that would rather inject a value than mount a file. Nothing reads a .env
+ * file to populate them, though; they have to be genuinely exported.
  */
 
-require('dotenv').config();
+const { loadConfigFile } = require('./loader');
 
 /*
- * Env parsing helpers. Throw on malformed input; an empty value ('') falls
- * back to the default
+ * Coercers. Each throws on malformed input, naming whichever source the value
+ * came from. The loader supplies the default, so these only ever see a value
+ * that is actually present
  */
 
-class EnvError extends Error {}
+class ConfigValueError extends Error {}
 
-const fail = (name, value, expected) => {
-  throw new EnvError(`${name} must be ${expected}, got ${JSON.stringify(value)}`);
+const fail = (label, value, expected) => {
+  throw new ConfigValueError(`${label} must be ${expected}, got ${JSON.stringify(value)}`);
 };
 
 const TRUE = ['true', '1', 'yes', 'on'];
 const FALSE = ['false', '0', 'no', 'off'];
 
-const bool = (v, dflt, name = 'value') => {
-  if (v === undefined || v === '') return dflt;
+const bool = (v, label) => {
+  if (typeof v === 'boolean') return v;
   const s = String(v).trim().toLowerCase();
   if (TRUE.includes(s)) return true;
   if (FALSE.includes(s)) return false;
-  return fail(name, v, `one of ${[...TRUE, ...FALSE].join(', ')}`);
+  return fail(label, v, `one of ${[...TRUE, ...FALSE].join(', ')}`);
 };
 
-const int = (v, dflt, name = 'value') => {
-  if (v === undefined || v === '') return dflt;
-  const n = Number(v);
-  if (!Number.isInteger(n)) return fail(name, v, 'an integer');
+const int = (v, label) => {
+  const n = typeof v === 'number' ? v : Number(String(v).trim());
+  if (!Number.isInteger(n)) return fail(label, v, 'an integer');
   return n;
 };
 
-const num = (v, dflt, name = 'value') => {
-  if (v === undefined || v === '') return dflt;
-  const n = Number(v);
-  if (!Number.isFinite(n)) return fail(name, v, 'a number');
+const num = (v, label) => {
+  const n = typeof v === 'number' ? v : Number(String(v).trim());
+  if (!Number.isFinite(n)) return fail(label, v, 'a number');
   return n;
 };
 
-/** Comma-separated list > trimmed, non-empty entries */
-const list = (v, dflt) =>
-  (v === undefined || v === '' ? dflt : v)
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+const str = (v, label) => {
+  if (v === null || typeof v === 'object') return fail(label, v, 'a string');
+  return String(v);
+};
+
+/** A YAML sequence, or (from an env var) a comma-separated string */
+const list = (v, label) => {
+  const items = Array.isArray(v) ? v : String(v).split(',');
+  return items.map((s) => String(s).trim()).filter(Boolean);
+};
+
+/** A YAML mapping of string > string, e.g. channel_routing */
+const map = (v, label) => {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) {
+    return fail(label, v, 'a mapping of key: value pairs');
+  }
+  return Object.fromEntries(Object.entries(v).map(([k, val]) => [k, String(val)]));
+};
+
+/*
+ * Role descriptors, from the same JSON an admin would otherwise paste into
+ * POST /_security/api_key by hand. An operator-supplied path is relative to the
+ * working directory (which is what they'd expect from a path in elastibot.yml);
+ * the built-in default is relative to this file
+ */
+function requireJson(override) {
+  if (!override) return require('../api_permissions/elastibot_analyst.json');
+  return require(require('path').resolve(process.cwd(), override));
+}
+
+const file = loadConfigFile();
+const s = file.get;
 
 const isProd = process.env.NODE_ENV === 'production';
 const isTest = process.env.NODE_ENV === 'test';
 
 module.exports = {
+  /*
+   * Where the settings came from. app.js logs this at boot and warns about:
+   *   - `permissions`, when the file holding every credential is readable by
+   *     someone other than its owner
+   *   - `shadowed`, a setting present in BOTH elastibot.yml and the
+   *     environment, where the YAML won and the env var did nothing
+   */
+  source: {
+    file: file.file,
+    permissions: file.permissions,
+    shadowed: file.shadowed,
+    unresolved: file.unresolved,
+  },
+
   // How long shutdown gets to drain watchers and flush stores before a hard exit
-  shutdownTimeoutMs: int(process.env.SHUTDOWN_TIMEOUT_MS, 15000, 'SHUTDOWN_TIMEOUT_MS'),
+  shutdownTimeoutMs: s('shutdown_timeout_ms', 'SHUTDOWN_TIMEOUT_MS', int, 15000),
 
   slack: {
-    // --- secrets (.env) ---
-    botToken: process.env.SLACK_BOT_TOKEN,          // xoxb-...
-    signingSecret: process.env.SLACK_SIGNING_SECRET,
-    appToken: process.env.SLACK_APP_TOKEN,          // xapp-...  (Socket Mode only)
+    // --- secrets ---
+    botToken: s('slack.bot_token', 'SLACK_BOT_TOKEN', str, undefined), // xoxb-...
+    signingSecret: s('slack.signing_secret', 'SLACK_SIGNING_SECRET', str, undefined),
+    appToken: s('slack.app_token', 'SLACK_APP_TOKEN', str, undefined), // xapp-... (Socket Mode)
 
     // --- tuning ---
     // Socket Mode needs no public URL - ideal for an internal/same-network deploy
-    socketMode: bool(process.env.SLACK_SOCKET_MODE, true, 'SLACK_SOCKET_MODE'),
-    port: int(process.env.PORT, 3000, 'PORT'),      // only used when socketMode = false
+    socketMode: s('slack.socket_mode', 'SLACK_SOCKET_MODE', bool, true),
+    port: s('slack.port', 'PORT', int, 3000), // only used when socketMode = false
   },
 
   elastic: {
-    // --- secrets / endpoints (.env) ---
+    // --- secrets / endpoints ---
     // API endpoint - every request Elastibot makes goes here, so it must be the
     // instance the API keys authenticate against (usually a direct node, not a proxy)
-    kibanaUrl: process.env.KIBANA_URL,
+    kibanaUrl: s('elastic.kibana_url', 'KIBANA_URL', str, undefined),
     // Browser endpoint used only for the links posted in Slack. Set it to the proxy
     // analysts actually log in to, so clicking a case link doesn't force a re-login.
     // Falls back to kibanaUrl when unset
-    kibanaPublicUrl: process.env.KIBANA_PUBLIC_URL || process.env.KIBANA_URL,
-    esUrl: process.env.ELASTICSEARCH_URL,
+    kibanaPublicUrl:
+      s('elastic.kibana_public_url', 'KIBANA_PUBLIC_URL', str, undefined) ||
+      s('elastic.kibana_url', 'KIBANA_URL', str, undefined),
+    esUrl: s('elastic.elasticsearch_url', 'ELASTICSEARCH_URL', str, undefined),
     // Service key used for non-user work (watchers, space-name lookups)
-    serviceApiKey: process.env.ELASTIC_SERVICE_API_KEY,
+    serviceApiKey: s('elastic.service_api_key', 'ELASTIC_SERVICE_API_KEY', str, undefined),
 
     // --- tuning ---
     // Internal clusters often use self-signed certs. Set to false to skip TLS verify
-    tlsRejectUnauthorized: bool(
-      process.env.ELASTIC_TLS_REJECT_UNAUTHORIZED, true, 'ELASTIC_TLS_REJECT_UNAUTHORIZED'
+    tlsRejectUnauthorized: s(
+      'elastic.tls_reject_unauthorized', 'ELASTIC_TLS_REJECT_UNAUTHORIZED', bool, true
     ),
-    requestTimeoutMs: int(process.env.ELASTIC_TIMEOUT_MS, 15000, 'ELASTIC_TIMEOUT_MS'),
+    requestTimeoutMs: s('elastic.timeout_ms', 'ELASTIC_TIMEOUT_MS', int, 15000),
 
     // Keep-alive connection pool size per host
-    maxSockets: int(process.env.ELASTIC_MAX_SOCKETS, 50, 'ELASTIC_MAX_SOCKETS'),
+    maxSockets: s('elastic.max_sockets', 'ELASTIC_MAX_SOCKETS', int, 50),
     // Ceiling on a single response body
-    maxResponseBytes: int(
-      process.env.ELASTIC_MAX_RESPONSE_BYTES, 50 * 1024 * 1024, 'ELASTIC_MAX_RESPONSE_BYTES'
+    maxResponseBytes: s(
+      'elastic.max_response_bytes', 'ELASTIC_MAX_RESPONSE_BYTES', int, 50 * 1024 * 1024
     ),
 
     // Index pattern searched to resolve an alert by ID
-    alertsIndex: process.env.ALERTS_INDEX || '.alerts-security.alerts-*',
+    alertsIndex: s('elastic.alerts_index', 'ALERTS_INDEX', str, '.alerts-security.alerts-*'),
 
     // Fallback owner if it can't be derived from the alert's consumer
-    defaultOwner: process.env.DEFAULT_CASE_OWNER || 'securitySolution',
+    defaultOwner: s('elastic.default_case_owner', 'DEFAULT_CASE_OWNER', str, 'securitySolution'),
 
     // Retry transient failures (429, 502/503/504, timeouts) on READ requests only.
     // Writes are never retried - creating a case twice is worse than failing once
-    retries: int(process.env.ELASTIC_RETRIES, 2, 'ELASTIC_RETRIES'),
-    retryBaseDelayMs: int(process.env.ELASTIC_RETRY_BASE_MS, 250, 'ELASTIC_RETRY_BASE_MS'),
+    retries: s('elastic.retries', 'ELASTIC_RETRIES', int, 2),
+    retryBaseDelayMs: s('elastic.retry_base_ms', 'ELASTIC_RETRY_BASE_MS', int, 250),
 
     // Role descriptors granted to any API key Elastibot creates automatically
     // via /start's "create one for me" option (src/commands/start.js,
     // src/elastic.js#provisionAnalystApiKey). Loaded from the same file an
     // admin would otherwise paste into POST /_security/api_key by hand, so the
     // manual and automatic paths can never drift apart
-    analystRoleDescriptors: require('../api_permissions/elastibot_analyst.json'),
+    analystRoleDescriptors: requireJson(
+      s('elastic.analyst_role_descriptors_path', 'ANALYST_ROLE_DESCRIPTORS_PATH', str, null)
+    ),
   },
 
   // ---------------------------------------------------------------
@@ -122,11 +175,11 @@ module.exports = {
   // ---------------------------------------------------------------
   logging: {
     // trace | debug | info | warn | error | fatal | silent
-    level: process.env.LOG_LEVEL || (isTest ? 'silent' : isProd ? 'info' : 'debug'),
+    level: s('logging.level', 'LOG_LEVEL', str, isTest ? 'silent' : isProd ? 'info' : 'debug'),
     // 'json' for log shipping (one object per line), 'pretty' for a terminal
-    format: process.env.LOG_FORMAT || (isProd ? 'json' : 'pretty'),
+    format: s('logging.format', 'LOG_FORMAT', str, isProd ? 'json' : 'pretty'),
     // Leave on. Only turn it off to debug the redactor itself, never in prod
-    redact: bool(process.env.LOG_REDACT, true, 'LOG_REDACT'),
+    redact: s('logging.redact', 'LOG_REDACT', bool, true),
   },
 
   // ---------------------------------------------------------------
@@ -135,20 +188,20 @@ module.exports = {
   cache: {
     // Space display names change about once a year; an hour of staleness after a
     // rename is an acceptable trade for one lookup per space per hour
-    spaceNameTtlMs: int(process.env.SPACE_NAME_TTL_MS, 3600000, 'SPACE_NAME_TTL_MS'),
+    spaceNameTtlMs: s('cache.space_name_ttl_ms', 'SPACE_NAME_TTL_MS', int, 3600000),
     // Per-analyst Elastic clients are reused rather than rebuilt per command.
     // Expiring them bounds the window in which a revoked key still has a client
-    clientTtlMs: int(process.env.ELASTIC_CLIENT_TTL_MS, 900000, 'ELASTIC_CLIENT_TTL_MS'),
-    maxClients: int(process.env.ELASTIC_MAX_CLIENTS, 250, 'ELASTIC_MAX_CLIENTS'),
+    clientTtlMs: s('cache.elastic_client_ttl_ms', 'ELASTIC_CLIENT_TTL_MS', int, 900000),
+    maxClients: s('cache.elastic_max_clients', 'ELASTIC_MAX_CLIENTS', int, 250),
     // Decrypted user records. Bounds how long a rotated key lingers in memory
-    userTtlMs: int(process.env.USER_CACHE_TTL_MS, 300000, 'USER_CACHE_TTL_MS'),
+    userTtlMs: s('cache.user_ttl_ms', 'USER_CACHE_TTL_MS', int, 300000),
   },
 
   security: {
     // 32+ char secret used to encrypt each analyst's stored Elastic API key at rest
     // (AES-256-GCM, key derived with scrypt and a per-value salt).
     // If unset, keys are stored in plaintext and a warning is logged at startup
-    encryptionKey: process.env.ELASTIBOT_SECRET_KEY,
+    encryptionKey: s('security.secret_key', 'ELASTIBOT_SECRET_KEY', str, undefined),
 
     /*
      * Local persistence (gitignored). Every store here is write-through: the
@@ -156,65 +209,50 @@ module.exports = {
      * after a restart, and anything that copies data/ out from under a live
      * process captures whatever was last written, not whatever is in memory
      */
-    userStorePath: process.env.USER_STORE_PATH || './data/users.json',
-    statePath: process.env.STATE_PATH || './data/state.json',
+    userStorePath: s('security.user_store_path', 'USER_STORE_PATH', str, './data/users.json'),
+    statePath: s('security.state_path', 'STATE_PATH', str, './data/state.json'),
     // Posted incidents: message coordinates, which alerts are on which case,
     // and the create-case claim. Holds no credentials, but losing it means
     // every open incident forgets its case and offers a green button again
-    incidentStorePath: process.env.INCIDENT_STORE_PATH || './data/incidents.json',
+    incidentStorePath: s(
+      'security.incident_store_path', 'INCIDENT_STORE_PATH', str, './data/incidents.json'
+    ),
 
     /*
      * Slack user IDs permitted to use /start's "create one for me" option,
      * which has Elastibot call POST /_security/api_key itself instead of the
      * analyst copy-pasting a key out of Kibana. Empty (the default) disables
-     * the option for EVERYONE - it has to be explicitly opted into per Slack
-     * user, because using it means pasting a credential capable of creating
-     * API keys, which is not something every analyst should be prompted for.
+     * the option for everyone.
      *
-     * This is Slack-side gating layered on top of, not instead of, Elastic's
-     * own enforcement: whatever admin credential someone pastes in still has
-     * to actually hold manage_api_key / manage_own_api_key, or Elasticsearch
-     * rejects the create call regardless of what this list says
+     * This is Slack-side gating only. Elasticsearch separately
+     * enforces that whatever admin credential someone pastes into that option
+     * actually holds manage_api_key / manage_own_api_key
      */
-    autoProvisionSlackIds: list(process.env.AUTO_PROVISION_SLACK_IDS, ''),
+    autoProvisionSlackIds: s(
+      'security.auto_provision_slack_ids', 'AUTO_PROVISION_SLACK_IDS', list, []
+    ),
   },
 
+  // ---------------------------------------------------------------
+  // GROUPING
+  // A burst of alerts from one user on one host is one incident
+  // ---------------------------------------------------------------
   grouping: {
-    // Alerts from the same host (same space) within this window are treated as
-    // one incident, collapsed into a single Slack message and, when a case is
-    // made, attached together. Default 1 hour
-    windowMs: int(process.env.GROUP_WINDOW_MS, 3600000, 'GROUP_WINDOW_MS'),
-    // Cap on how many alerts a single grouped case will pull in
-    maxAlertsPerCase: int(process.env.GROUP_MAX_ALERTS, 200, 'GROUP_MAX_ALERTS'),
-
+    // Window measured from the FIRST alert in a cluster, not the previous one
+    windowMs: s('grouping.window_ms', 'GROUP_WINDOW_MS', int, 3600000),
+    // Pass 2: fold machine-identity clusters into the human cluster they overlap
+    mergeMachineUsers: s('grouping.merge_machine_users', 'GROUP_MERGE_MACHINE_USERS', bool, true),
+    // Ceiling on how many alerts get folded into one case
+    maxAlertsPerCase: s('grouping.max_alerts', 'GROUP_MAX_ALERTS', int, 200),
     /*
-     * Fold machine-identity alerts into the human incident on the same host.
-     *
-     * Without this, an analyst session on web-01 that fires alerts under
-     * `jsmith` and alerts under `SYSTEM` (because a service ran the command)
-     * becomes two messages and two cases, even though it is one incident.
-     * Two *human* users on one host still stay separate
-     *
-     * false = the old spaceId + user + host behaviour
+     * Identities treated as machine rather than human. Globs allowed.
+     * It is the one setting here that is specific to each environment's naming
+     * conventions. The default list is a reasonable starting point
      */
-    mergeMachineUsers: bool(
-      process.env.GROUP_MERGE_MACHINE_USERS, true, 'GROUP_MERGE_MACHINE_USERS'
-    ),
-
-    /*
-     * Identities that say nothing about *who* was at the keyboard. Globs,
-     * case-insensitive, matched after stripping any domain prefix
-     * (NT AUTHORITY\SYSTEM matches SYSTEM). Names ending in `$` are AD computer
-     * accounts and always match whether listed or not, as does an absent user
-     *
-     * TUNE THIS. It is the one setting here that is specific to each environment's naming conventions.
-     * The default list is a reasonable starting point
-     */
-    machineUsers: list(
-      process.env.GROUP_MACHINE_USERS,
-      'SYSTEM,LOCAL SERVICE,NETWORK SERVICE,LOCAL SYSTEM,ANONYMOUS LOGON,' +
-        'root,daemon,nobody,svc_*,svc-*,sa_*,_*'
-    ),
+    machineUsers: s('grouping.machine_users', 'GROUP_MACHINE_USERS', list, [
+      'SYSTEM', 'LOCAL SERVICE', 'NETWORK SERVICE', 'LOCAL SYSTEM', 'ANONYMOUS LOGON',
+      'root', 'daemon', 'nobody', 'svc_*', 'svc-*', 'sa_*', '_*',
+    ]),
   },
 
   // ---------------------------------------------------------------
@@ -226,75 +264,69 @@ module.exports = {
     // No new alerts for this long and the record is reaped. The next alert on
     // that host starts a fresh incident with a green Create case button, so
     // pick something like a shift length rather than something short
-    idleMs: int(process.env.INCIDENT_IDLE_MS, 8 * 3600000, 'INCIDENT_IDLE_MS'),
-    // Hard ceiling regardless of activity. Without it, a host trickling one
-    // alert every 7 hours builds one incident that never ends and a case that
-    // grows without bound
-    maxLifetimeMs: int(
-      process.env.INCIDENT_MAX_LIFETIME_MS, 24 * 3600000, 'INCIDENT_MAX_LIFETIME_MS'
-    ),
+    idleMs: s('incidents.idle_ms', 'INCIDENT_IDLE_MS', int, 8 * 3600000),
+    // Hard ceiling regardless of activity
+    maxLifetimeMs: s('incidents.max_lifetime_ms', 'INCIDENT_MAX_LIFETIME_MS', int, 24 * 3600000),
     // How long a create-case claim is honoured before it's treated as abandoned.
     // Long enough to cover the Elastic round trips, short enough that a handler
     // dying mid-click doesn't wedge the incident for the rest of the shift
-    claimTtlMs: int(process.env.INCIDENT_CLAIM_TTL_MS, 60000, 'INCIDENT_CLAIM_TTL_MS'),
+    claimTtlMs: s('incidents.claim_ttl_ms', 'INCIDENT_CLAIM_TTL_MS', int, 60000),
   },
 
   naming: {
     // Truncate the rule name in a case title to N words. Unset = use it whole
-    truncateRuleWords:
-      process.env.CASE_TITLE_RULE_WORDS
-        ? int(process.env.CASE_TITLE_RULE_WORDS, null, 'CASE_TITLE_RULE_WORDS')
-        : null,
-    timeZone: process.env.CASE_TITLE_TIMEZONE || process.env.STATS_TIMEZONE || 'UTC',
+    truncateRuleWords: s('naming.rule_words', 'CASE_TITLE_RULE_WORDS', int, null),
+    timeZone:
+      s('naming.timezone', 'CASE_TITLE_TIMEZONE', str, undefined) ||
+      s('stats.timezone', 'STATS_TIMEZONE', str, 'UTC'),
   },
 
   stats: {
     // Lookback used by /stats when the analyst doesn't pass one (e.g. '24h', '7d', '2w')
-    defaultWindow: process.env.STATS_DEFAULT_WINDOW || '7d',
+    defaultWindow: s('stats.default_window', 'STATS_DEFAULT_WINDOW', str, '7d'),
     // Hard cap on how far back /stats will look
-    maxWindowDays: int(process.env.STATS_MAX_WINDOW_DAYS, 90, 'STATS_MAX_WINDOW_DAYS'),
+    maxWindowDays: s('stats.max_window_days', 'STATS_MAX_WINDOW_DAYS', int, 90),
     // Timezone used to bucket alerts into hours/weekdays. 'UTC' or an IANA name
-    timeZone: process.env.STATS_TIMEZONE || 'UTC',
+    timeZone: s('stats.timezone', 'STATS_TIMEZONE', str, 'UTC'),
     // How many entries each "top N" list shows
-    topN: int(process.env.STATS_TOP_N, 10, 'STATS_TOP_N'),
+    topN: s('stats.top_n', 'STATS_TOP_N', int, 10),
     // Minimum alerts before a rule can appear in the "noisiest" list
-    noiseMinAlerts: int(process.env.STATS_NOISE_MIN_ALERTS, 10, 'STATS_NOISE_MIN_ALERTS'),
+    noiseMinAlerts: s('stats.noise_min_alerts', 'STATS_NOISE_MIN_ALERTS', int, 10),
     // Field holding the process/program name. Override if your alerts use a
     // different mapping (e.g. 'process.executable'). Validated at boot
-    processField: process.env.STATS_PROCESS_FIELD || 'process.name',
+    processField: s('stats.process_field', 'STATS_PROCESS_FIELD', str, 'process.name'),
   },
 
   watchers: {
-    enabled: bool(process.env.WATCHERS_ENABLED, true, 'WATCHERS_ENABLED'),
-    pollIntervalMs: int(process.env.WATCH_POLL_MS, 60000, 'WATCH_POLL_MS'),
+    enabled: s('watchers.enabled', 'WATCHERS_ENABLED', bool, true),
+    pollIntervalMs: s('watchers.poll_ms', 'WATCH_POLL_MS', int, 60000),
     // Randomise each interval by +/- this fraction, so two replicas started by
     // the same deploy don't hit Elastic in lockstep forever
-    jitterRatio: num(process.env.WATCH_JITTER_RATIO, 0.1, 'WATCH_JITTER_RATIO'),
+    jitterRatio: s('watchers.jitter_ratio', 'WATCH_JITTER_RATIO', num, 0.1),
     // How many new alerts to pull per poll - keep above a plausible burst size so a
     // spike is grouped in one pass instead of split across polls
-    fetchSize: int(process.env.WATCH_FETCH_SIZE, 200, 'WATCH_FETCH_SIZE'),
+    fetchSize: s('watchers.fetch_size', 'WATCH_FETCH_SIZE', int, 200),
     // Delay between channel posts within a tick, to stay under Slack rate limits
-    postDelayMs: int(process.env.WATCH_POST_DELAY_MS, 300, 'WATCH_POST_DELAY_MS'),
+    postDelayMs: s('watchers.post_delay_ms', 'WATCH_POST_DELAY_MS', int, 300),
 
     // ---------------------------------------------------------------
     // CHANNEL ROUTING
     // Map an Elastic space ID to the Slack channel ID that should receive
-    // its new alerts and cases. Anything unmatched goes to defaultChannel
+    // its new alerts and cases. Anything unmatched goes to default_channel.
     // ---------------------------------------------------------------
-    defaultChannel: process.env.DEFAULT_CHANNEL || '',   // e.g. 'C0123456789'
-    channelRouting: {
-      // 'space-name-1': 'C0123456789',
-    },
+    defaultChannel: s('watchers.default_channel', 'DEFAULT_CHANNEL', str, ''),
+    channelRouting: s('watchers.channel_routing', null, map, {}),
 
     alerts: {
-      enabled: bool(process.env.WATCH_ALERTS_ENABLED, true, 'WATCH_ALERTS_ENABLED'),
+      enabled: s('watchers.alerts.enabled', 'WATCH_ALERTS_ENABLED', bool, true),
     },
     cases: {
-      enabled: bool(process.env.WATCH_CASES_ENABLED, true, 'WATCH_CASES_ENABLED'),
-      // Cases are polled per-space via the Kibana Cases API. List the space IDs you want watched here.
-      spaces: list(process.env.WATCH_CASE_SPACES, 'default'),
+      enabled: s('watchers.cases.enabled', 'WATCH_CASES_ENABLED', bool, true),
+      // Cases are polled per-space via the Kibana Cases API. List the space IDs
+      // you want watched here
+      spaces: s('watchers.cases.spaces', 'WATCH_CASE_SPACES', list, ['default']),
       // Page size for the Cases _find call
-      perPage: int(process.env.WATCH_CASES_PER_PAGE, 25, 'WATCH_CASES_PER_PAGE'),
+      perPage: s('watchers.cases.per_page', 'WATCH_CASES_PER_PAGE', int, 25),
     },
   },
 };
