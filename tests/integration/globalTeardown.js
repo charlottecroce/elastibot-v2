@@ -13,7 +13,7 @@
  */
 
 const axios = require('axios');
-const env = require('./env');
+const { stack } = require('../testenv');
 
 module.exports = async () => {
   const encoded = process.env.ELASTIBOT_TEST_API_KEY;
@@ -23,8 +23,8 @@ module.exports = async () => {
   // problem and not a reason to fail a run that otherwise passed
   try {
     const id = Buffer.from(encoded, 'base64').toString('utf8').split(':')[0];
-    await axios.delete(`${env.esUrl}/_security/api_key`, {
-      auth: { username: env.username, password: env.password },
+    await axios.delete(`${stack.esUrl}/_security/api_key`, {
+      auth: { username: stack.username, password: stack.password },
       data: { ids: [id] },
       timeout: 5000,
       validateStatus: () => true,
