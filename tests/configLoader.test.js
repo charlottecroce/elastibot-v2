@@ -197,7 +197,6 @@ describe('file permissions', () => {
     return f;
   };
 
-  // eslint-disable-next-line jest/no-disabled-tests
   const onPosix = process.platform === 'win32' ? test.skip : test;
 
   onPosix('owner-only is silent', () => {
