@@ -17,22 +17,39 @@ const { logger } = require('../util/logger');
 const execFileAsync = promisify(execFile);
 const log = logger.child({ scope: 'sigma:repo' });
 
+const DEFAULT_TIMEOUT_MS = 600000;
+
 function git(args, opts = {}) {
   return execFileAsync('git', args, { maxBuffer: 32 * 1024 * 1024, ...opts });
 }
 
-async function isGitRepo(dir) {
+async function isGitRepo(dir, opts) {
   try {
-    await git(['-C', dir, 'rev-parse', '--git-dir']);
+    await git(['-C', dir, 'rev-parse', '--git-dir'], opts);
     return true;
   } catch {
     return false;
   }
 }
 
-async function headCommit(dir) {
-  const { stdout } = await git(['-C', dir, 'rev-parse', 'HEAD']);
+async function headCommit(dir, opts) {
+  const { stdout } = await git(['-C', dir, 'rev-parse', 'HEAD'], opts);
   return stdout.trim();
+}
+
+async function originUrl(dir, opts) {
+  try {
+    const { stdout } = await git(['-C', dir, 'config', '--get', 'remote.origin.url'], opts);
+    return stdout.trim();
+  } catch {
+    return null;
+  }
+}
+
+/** Trailing slashes and a `.git` suffix are the same repo, not a different one */
+function sameRemote(a, b) {
+  const norm = (u) => String(u || '').trim().replace(/\.git$/, '').replace(/\/+$/, '');
+  return norm(a) === norm(b);
 }
 
 /**
@@ -45,27 +62,51 @@ async function headCommit(dir) {
  * @param {number} [opts.timeoutMs]
  * @returns {Promise<{repoPath: string, commit: string, cloned: boolean}>}
  */
-async function ensureRepo({ repoUrl, ref, repoPath, timeoutMs = 600000 }) {
+async function ensureRepo({ repoUrl, ref, repoPath, timeoutMs = DEFAULT_TIMEOUT_MS }) {
   const dir = path.resolve(process.cwd(), repoPath);
+
+  /*
+   * Every git call gets the timeout, not just the network ones. A rev-parse
+   * against a directory on a wedged NFS mount hangs as thoroughly as a fetch,
+   * and a sync that never returns is worse than one that fails
+   */
   const opts = { timeout: timeoutMs };
 
-  if (await isGitRepo(dir)) {
-    log.info('updating sigma repo', { dir, ref });
-    // Reset rather than pull: a shallow clone with a rewritten upstream branch
-    // cannot merge, and nothing local is ever worth keeping here
-    await git(['-C', dir, 'fetch', '--depth', '1', 'origin', ref], opts);
-    await git(['-C', dir, 'checkout', '-B', ref, 'FETCH_HEAD'], opts);
-    await git(['-C', dir, 'reset', '--hard', 'FETCH_HEAD'], opts);
-    return { repoPath: dir, commit: await headCommit(dir), cloned: false };
+  if (await isGitRepo(dir, opts)) {
+    const current = await originUrl(dir, opts);
+
+    if (current && !sameRemote(current, repoUrl)) {
+      /*
+       * sigma.repo_url was changed under an existing clone. Fetching would
+       * quietly keep pulling from the OLD remote and the operator would get
+       * rules from a repository they thought they had stopped using
+       */
+      log.warn('sigma repo url changed - re-cloning', { dir, from: current, to: repoUrl });
+      fs.rmSync(dir, { recursive: true, force: true });
+    } else {
+      log.info('updating sigma repo', { dir, ref });
+      // Reset rather than pull: a shallow clone with a rewritten upstream branch
+      // cannot merge, and nothing local is ever worth keeping here
+      await git(['-C', dir, 'fetch', '--depth', '1', 'origin', ref], opts);
+      await git(['-C', dir, 'checkout', '-B', ref, 'FETCH_HEAD'], opts);
+      await git(['-C', dir, 'reset', '--hard', 'FETCH_HEAD'], opts);
+      return { repoPath: dir, commit: await headCommit(dir, opts), cloned: false };
+    }
   }
 
   log.info('cloning sigma repo', { repoUrl, dir, ref });
   fs.mkdirSync(path.dirname(dir), { recursive: true });
   await git(['clone', '--depth', '1', '--branch', ref, repoUrl, dir], opts);
-  return { repoPath: dir, commit: await headCommit(dir), cloned: true };
+  return { repoPath: dir, commit: await headCommit(dir, opts), cloned: true };
 }
 
-/** Every .yml/.yaml file under the given subdirectories of the repo */
+/**
+ * Every .yml/.yaml file under the given subdirectories of the repo.
+ *
+ * Symlinked directories are skipped rather than followed: `isDirectory()` is
+ * false for a symlink, which is what keeps a link back up the tree from turning
+ * this walk into an infinite one
+ */
 function collectRuleFiles(repoPath, ruleDirs) {
   const files = [];
 
@@ -80,7 +121,7 @@ function collectRuleFiles(repoPath, ruleDirs) {
       if (entry.name.startsWith('.')) continue;
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
-      else if (/\.ya?ml$/i.test(entry.name)) files.push(full);
+      else if (entry.isFile() && /\.ya?ml$/i.test(entry.name)) files.push(full);
     }
   };
 
@@ -88,4 +129,4 @@ function collectRuleFiles(repoPath, ruleDirs) {
   return files.sort();
 }
 
-module.exports = { ensureRepo, collectRuleFiles };
+module.exports = { ensureRepo, collectRuleFiles, sameRemote };

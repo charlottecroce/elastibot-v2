@@ -20,7 +20,13 @@ const {
   statusBlocks,
   fallbackText,
 } = require('../services/sigmaBlocks');
-const { createSession, getSession, unpackValue, pageOf } = require('../services/sigmaSession');
+const {
+  createSession,
+  getSession,
+  unpackValue,
+  pageOf,
+  itemAt,
+} = require('../services/sigmaSession');
 const { isUserFacing } = require('../util/errors');
 const { ACTIONS, COMMANDS } = require('../constants');
 
@@ -28,7 +34,7 @@ const { ACTIONS, COMMANDS } = require('../constants');
  * /sigma - reconcile the detection rules in a Kibana space against the local
  * Sigma database that `npm run update-sigmaDB` builds.
  *
- *   /sigma update [space:<id>]          what has drifted, with an Update button
+ *   /sigma update [space:<id>]           what has drifted, with an Update button
  *   /sigma search <keyword> [space:<id>] Sigma rules by keyword, with Add/Update/View
  *   /sigma status                        when the database was last synced
  *
@@ -93,20 +99,29 @@ async function runInSpace({ sub, query, spaceId, user, slackUserId, respond, log
  * A failure marks the item and re-renders rather than replacing the whole page
  * with an error: nine other rules on that page are still actionable, and losing
  * the list because one rule was deleted in Kibana five minutes ago is a bad
- * trade. Unexpected errors still propagate to the registrar
+ * trade. The previous state is kept so the block kit can offer the button again
+ * and the analyst can retry in place. Unexpected errors still propagate to the
+ * registrar
  */
 async function applyToItem({ apply, value, slackUserId, user, respond, log }) {
   const { t, p, i } = unpackValue(value);
   const session = getSession(t, slackUserId);
-  const item = session.items[i];
-  if (!item) return;
+
+  const item = itemAt(session, i);
+  if (!item) {
+    // A stale message against a live session. Re-render rather than leaving the
+    // click looking like it did nothing
+    log.info('sigma action addressed an item that is not in the session', { index: i });
+    await showPage({ respond, session, page: p, apiKey: user.apiKey });
+    return;
+  }
 
   let fields;
   try {
     fields = await apply(item, session);
   } catch (err) {
     if (!isUserFacing(err)) throw err;
-    fields = { state: STATE.FAILED, error: err.message };
+    fields = { state: STATE.FAILED, error: err.message, previousState: item.state };
     log.info('sigma action rejected', { ruleId: item.ruleId, reason: err.message });
   }
 
@@ -161,7 +176,11 @@ module.exports = function registerSigma(reg) {
       requireUser: true,
       usage: SIGMA_USAGE,
       userErrorSuffix: SIGMA_USAGE,
-      minArgs: 1,
+      /*
+       * No minArgs. A bare `/sigma` parses to `help` and prints the usage
+       * itself; with minArgs: 1 the registrar answered first and the help
+       * branch above was unreachable
+       */
     }
   );
 
@@ -176,7 +195,7 @@ module.exports = function registerSigma(reg) {
         text:
           pending.sub === 'update'
             ? `Comparing \`${s}\` against the Sigma database…`
-            : `Searching the Sigma database…`,
+            : 'Searching the Sigma database…',
         blocks: [],
       });
 
@@ -218,6 +237,7 @@ module.exports = function registerSigma(reg) {
           const result = await updateStackRule(user.apiKey, session.spaceId, item.ruleId);
           return {
             state: result.alreadyCurrent ? STATE.CURRENT : STATE.UPDATED,
+            stackId: result.stackId || item.stackId,
             changes: [],
           };
         },

@@ -17,8 +17,7 @@ const { logger } = require('../util/logger');
  * The client is required lazily, not at import time. `@prisma/client` throws if
  * it hasn't been generated yet, and the bot must still boot on a deployment
  * that has never run the sync - `/sigma` then explains what to run instead of
- * the process dying at startup.
- *
+ * the process dying at startup
  */
 
 const execFileAsync = promisify(execFile);
@@ -28,7 +27,33 @@ const NOT_READY =
   'The Sigma database is not set up yet. An admin needs to run `npm run sigma:setup` ' +
   'and then `npm run update-sigmaDB`.';
 
+/*
+ * SQLite compiled with the default SQLITE_MAX_VARIABLE_NUMBER caps a statement
+ * at 999 host parameters, and a `where: { in: [...] }` spends one per id. Sigma
+ * ships several thousand rules and a mature stack has thousands of detection
+ * rules, so every list that reaches a query goes through chunk() first
+ */
+const MAX_SQL_VARS = 900;
+
+/** Rows per write transaction. Big enough to matter, small enough to not lock */
+const WRITE_CHUNK = 250;
+
 let prisma = null;
+
+function chunk(items, size) {
+  const out = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/**
+ * Sigma ids are UUIDs and case is not meaningful in one, but sigma-cli and
+ * Kibana do not always agree on it. Normalising on the way in and on every
+ * lookup is what stops a rule silently failing to match itself
+ */
+function normalizeId(value) {
+  return String(value || '').trim().toLowerCase();
+}
 
 /** The datasource url, with any relative `file:` path made absolute */
 function datasourceUrl() {
@@ -80,6 +105,20 @@ function getClient() {
 }
 
 /**
+ * How to invoke the Prisma CLI.
+ *
+ * The locally installed binary is preferred because bare `npx prisma` will
+ * DOWNLOAD prisma on a host that doesn't have it - a slow, silent, network-
+ * dependent way to fail on a machine that was only ever meant to run the bot.
+ * `--no-install` makes the fallback say so instead
+ */
+function prismaCli() {
+  const binary = process.platform === 'win32' ? 'prisma.cmd' : 'prisma';
+  const local = path.resolve(process.cwd(), 'node_modules', '.bin', binary);
+  return fs.existsSync(local) ? { cmd: local, prefix: [] } : { cmd: 'npx', prefix: ['--no-install', 'prisma'] };
+}
+
+/**
  * Run a Prisma CLI command with the datasource url in its environment.
  *
  * Every CLI invocation in this project goes through here. Calling `prisma`
@@ -91,9 +130,10 @@ function getClient() {
  */
 async function runPrisma(args) {
   const env = { ...process.env, SIGMA_DATABASE_URL: datasourceUrl() };
+  const { cmd, prefix } = prismaCli();
 
   try {
-    const { stdout, stderr } = await execFileAsync('npx', ['prisma', ...args], {
+    const { stdout, stderr } = await execFileAsync(cmd, [...prefix, ...args], {
       env,
       cwd: process.cwd(),
       timeout: config.sigma.commandTimeoutMs,
@@ -143,17 +183,37 @@ function toRule(row) {
   };
 }
 
-/** Every rule in the list, keyed by ruleId. Used by /sigma update */
+/**
+ * Every rule in the list, keyed by NORMALISED ruleId. Used by /sigma update.
+ *
+ * Chunked: a space with three thousand Sigma-derived rules would otherwise
+ * build a single statement with three thousand host parameters
+ */
 async function getRulesByIds(ruleIds) {
-  if (!ruleIds || !ruleIds.length) return new Map();
-  const rows = await getClient().sigmaRule.findMany({
-    where: { ruleId: { in: [...new Set(ruleIds)] } },
-  });
-  return new Map(rows.map((row) => [row.ruleId, toRule(row)]));
+  const ids = [...new Set((ruleIds || []).map(normalizeId).filter(Boolean))];
+  const found = new Map();
+  if (!ids.length) return found;
+
+  const client = getClient();
+  for (const batch of chunk(ids, MAX_SQL_VARS)) {
+    const rows = await client.sigmaRule.findMany({ where: { ruleId: { in: batch } } });
+    for (const row of rows) found.set(normalizeId(row.ruleId), toRule(row));
+  }
+  return found;
 }
 
 async function getRule(ruleId) {
-  return toRule(await getClient().sigmaRule.findUnique({ where: { ruleId } }));
+  const row = await getClient().sigmaRule.findUnique({ where: { ruleId: normalizeId(ruleId) } });
+  return toRule(row);
+}
+
+/**
+ * `%` and `_` are LIKE wildcards, so a keyword containing one would quietly
+ * mean something other than what the analyst typed. Prisma's `contains` gives
+ * no way to attach an ESCAPE clause on sqlite, so they are dropped
+ */
+function likeTerm(term) {
+  return String(term || '').trim().replace(/[%_]/g, '').slice(0, 200);
 }
 
 /**
@@ -163,9 +223,12 @@ async function getRule(ruleId) {
  * `mode: 'insensitive'` here - Prisma doesn't support that flag on sqlite
  */
 async function searchRules(term, limit) {
+  const needle = likeTerm(term);
+  if (!needle) return [];
+
   const rows = await getClient().sigmaRule.findMany({
     where: {
-      OR: [{ title: { contains: term } }, { description: { contains: term } }],
+      OR: [{ title: { contains: needle } }, { description: { contains: needle } }],
     },
     orderBy: { title: 'asc' },
     take: limit,
@@ -181,23 +244,62 @@ async function getMeta() {
   return getClient().sigmaMeta.findUnique({ where: { id: 1 } });
 }
 
-/** Upsert a batch of already-shaped rows. Called only by the sync */
+/**
+ * Upsert a batch of already-shaped rows. Called only by the sync.
+ *
+ * Batched into transactions rather than awaited one at a time: three thousand
+ * sequential round trips to a local sqlite file is minutes of wall clock for
+ * work that takes seconds
+ */
 async function upsertRules(rows) {
+  if (!rows || !rows.length) return 0;
   const client = getClient();
-  for (const row of rows) {
-    await client.sigmaRule.upsert({
-      where: { ruleId: row.ruleId },
-      create: row,
-      update: row,
-    });
+  let written = 0;
+
+  for (const batch of chunk(rows, WRITE_CHUNK)) {
+    await client.$transaction(
+      batch.map((row) => {
+        const record = { ...row, ruleId: normalizeId(row.ruleId) };
+        return client.sigmaRule.upsert({
+          where: { ruleId: record.ruleId },
+          create: record,
+          update: record,
+        });
+      })
+    );
+    written += batch.length;
   }
+
+  return written;
 }
 
-/** Drop rules that are no longer in the repo (deleted or renamed upstream) */
+/**
+ * Drop rules that are no longer in the repo (deleted or renamed upstream).
+ *
+ * Read the ids, diff in memory, delete by `in` - a `notIn` over several
+ * thousand ids is both a host-parameter problem and impossible to chunk
+ * correctly, since chunking an exclusion turns it into "delete nearly
+ * everything" one batch at a time.
+ *
+ * An empty keep-list is refused rather than obeyed. ingest.js already guards
+ * against a zero-row sync, and this is the second lock on the same door: the
+ * old `notIn: []` meant "delete every rule you have"
+ */
 async function deleteRulesNotIn(ruleIds) {
-  const { count } = await getClient().sigmaRule.deleteMany({
-    where: { ruleId: { notIn: [...new Set(ruleIds)] } },
-  });
+  const keep = new Set((ruleIds || []).map(normalizeId).filter(Boolean));
+  if (!keep.size) {
+    throw new Error('deleteRulesNotIn was given no ids - refusing to empty the rule table.');
+  }
+
+  const client = getClient();
+  const existing = await client.sigmaRule.findMany({ select: { ruleId: true } });
+  const doomed = existing.map((r) => r.ruleId).filter((id) => !keep.has(normalizeId(id)));
+
+  let count = 0;
+  for (const batch of chunk(doomed, MAX_SQL_VARS)) {
+    const { count: n } = await client.sigmaRule.deleteMany({ where: { ruleId: { in: batch } } });
+    count += n;
+  }
   return count;
 }
 
@@ -221,6 +323,7 @@ module.exports = {
   datasourceUrl,
   dbFilePath,
   isReady,
+  normalizeId,
   runPrisma,
   generateClient,
   ensureSchema,

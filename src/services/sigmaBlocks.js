@@ -2,30 +2,30 @@
 
 const config = require('../../config');
 const { ACTIONS } = require('../constants');
+const { STATE } = require('../sigma/state');
 const { esc, fenceSafe } = require('../util/mrkdwn');
+const { section, context, divider, button, actions, chunk, compact } = require('../slack/blocks');
 const { ruleUrl } = require('./kibanaLinks');
 const { packValue, pageOf } = require('./sigmaSession');
-const { STATE } = require('./sigmaService');
 
 /*
  * Block Kit for /sigma. Builders only - nothing here talks to Slack, Elastic or
- * the database, which is what makes the layout testable
+ * the database, which is what makes the layout testable.
  *
  * Slack caps a message at 50 blocks. A page is pageSize items at two blocks
  * each plus a header and a footer, so the default of 10 leaves plenty of room;
- * raising SIGMA_PAGE_SIZE past ~20 would not
+ * raising SIGMA_PAGE_SIZE past ~20 would not - hence the range check in
+ * config/validate.js
  */
 
-const MAX_SPACE_BUTTONS = 25; // Slack's per-actions-block element limit
+/*
+ * 25 buttons over five rows. Not a Slack limit - `actions` caps a single block
+ * at 25 elements and these are chunked into rows of five - but a picker longer
+ * than this is a list, and `space:<id>` is the better answer for a stack with
+ * fifty spaces
+ */
+const MAX_SPACE_BUTTONS = 25;
 const BUTTONS_PER_ROW = 5;
-
-function section(text) {
-  return { type: 'section', text: { type: 'mrkdwn', text } };
-}
-
-function context(text) {
-  return { type: 'context', elements: [{ type: 'mrkdwn', text }] };
-}
 
 /** A value squeezed into something that fits on one line of a Slack message */
 function short(value, max = 70) {
@@ -33,25 +33,6 @@ function short(value, max = 70) {
   if (value && typeof value === 'object') return fenceSafe(JSON.stringify(value), { max });
   const text = fenceSafe(value, { max });
   return text || '_empty_';
-}
-
-function button(text, actionId, value, { style, url } = {}) {
-  const btn = {
-    type: 'button',
-    text: { type: 'plain_text', text, emoji: true },
-    action_id: actionId,
-  };
-  if (value) btn.value = value;
-  if (style) btn.style = style;
-  if (url) btn.url = url;
-  return btn;
-}
-
-/** Chunk a list into rows of `size` */
-function chunk(items, size) {
-  const rows = [];
-  for (let i = 0; i < items.length; i += size) rows.push(items.slice(i, i + size));
-  return rows;
 }
 
 /**
@@ -72,24 +53,24 @@ function spacePickerBlocks(spaces, token, { verb }) {
       )
     ),
     BUTTONS_PER_ROW
-  ).map((elements) => ({ type: 'actions', elements }));
+  ).map(actions);
 
-  const blocks = [section(`*Which space should I ${esc(verb)}?*`), ...rows];
-
-  if (spaces.length > shown.length) {
-    blocks.push(
-      context(
-        `Showing ${shown.length} of ${spaces.length} spaces. ` +
-          'Add `space:<id>` to the command to pick one directly.'
-      )
-    );
-  }
-  return blocks;
+  return compact([
+    section(`*Which space should I ${esc(verb)}?*`),
+    rows,
+    spaces.length > shown.length
+      ? context(
+          `Showing ${shown.length} of ${spaces.length} spaces. ` +
+            'Add `space:<id>` to the command to pick one directly.'
+        )
+      : null,
+  ]);
 }
 
 /** "name, description +2 more" */
 function changeSummary(changes) {
-  const fields = changes.map((c) => `\`${esc(c.field)}\``);
+  const fields = (changes || []).map((c) => `\`${esc(c.field)}\``);
+  if (!fields.length) return '';
   if (fields.length <= 3) return fields.join(', ');
   return `${fields.slice(0, 3).join(', ')} +${fields.length - 3} more`;
 }
@@ -102,31 +83,44 @@ function changeSummary(changes) {
  * tell an analyst to go and look
  */
 function changeDetail(changes) {
-  const lines = changes.slice(0, 4).map((change) => {
+  const lines = (changes || []).slice(0, 4).map((change) => {
     if (change.field === 'tags') return `*tags* + ${esc(short(change.added, 90))}`;
     if (change.field === 'query') return '*query* — detection logic changed';
     return `*${esc(change.field)}* \`${esc(short(change.from, 40))}\` → \`${esc(short(change.to, 60))}\``;
   });
-  if (changes.length > lines.length) lines.push(`_+${changes.length - lines.length} more_`);
+  if ((changes || []).length > lines.length) {
+    lines.push(`_+${changes.length - lines.length} more_`);
+  }
   return lines.join('\n');
 }
 
-/** Header + footer shared by both paged views */
+/** Footer shared by both paged views */
 function pagerFooter(session, page, total) {
   const elements = [];
   if (page > 1) {
-    elements.push(button('◀ Back', ACTIONS.SIGMA_PAGE, packValue({ t: session.token, p: page - 1 })));
+    elements.push(
+      button('◀ Back', ACTIONS.SIGMA_PAGE, packValue({ t: session.token, p: page - 1 }))
+    );
   }
   if (page < total) {
-    elements.push(button('Next ▶', ACTIONS.SIGMA_PAGE, packValue({ t: session.token, p: page + 1 })));
+    elements.push(
+      button('Next ▶', ACTIONS.SIGMA_PAGE, packValue({ t: session.token, p: page + 1 }))
+    );
   }
 
-  const blocks = [context(`Page *${page}* of *${total}* · ${session.items.length} rule(s)`)];
-  if (elements.length) blocks.push({ type: 'actions', elements });
-  return blocks;
+  return [
+    context(`Page *${page}* of *${total}* · ${session.items.length} rule(s)`),
+    actions(elements),
+  ];
 }
 
-/** The button (or the reason there isn't one) for a rule in a given state */
+/**
+ * The button (or the reason there isn't one) for a rule in a given state.
+ *
+ * FAILED falls back to whatever button the item had before it failed, so a rule
+ * that lost a race with somebody editing it in Kibana can be retried from the
+ * same page instead of by running the whole command again
+ */
 function actionFor(session, page, item) {
   const value = packValue({ t: session.token, p: page, i: item.i });
   const url = item.stackId ? ruleUrl(session.spaceId, item.stackId) : null;
@@ -137,10 +131,13 @@ function actionFor(session, page, item) {
     case STATE.OUTDATED:
       return button('Update rule', ACTIONS.SIGMA_RULE_UPDATE, value, { style: 'primary' });
     case STATE.CURRENT:
-      return url ? button('View rule', ACTIONS.SIGMA_RULE_VIEW, null, { url }) : null;
     case STATE.UPDATED:
     case STATE.ADDED:
       return url ? button('View rule', ACTIONS.SIGMA_RULE_VIEW, null, { url }) : null;
+    case STATE.FAILED:
+      return item.previousState && item.previousState !== STATE.FAILED
+        ? actionFor(session, page, { ...item, state: item.previousState })
+        : null;
     default:
       return null;
   }
@@ -164,10 +161,27 @@ function stateNote(item) {
   }
 }
 
+/**
+ * One rule: a section with its button, plus a status line underneath.
+ *
+ * The fallback chain matters. Slack rejects the whole message if a context
+ * block's text is empty, and an item whose changes were cleared by a successful
+ * update would otherwise produce exactly that
+ */
+function ruleBlocks(session, page, item, { title }) {
+  const note = stateNote(item);
+  const detail = item.changes?.length ? changeDetail(item.changes) : null;
+
+  return [
+    section(title, actionFor(session, page, item)),
+    context(note || detail || `\`${esc(item.ruleId)}\``),
+  ];
+}
+
 /** /sigma update - one page of drifted rules */
 function updatePageBlocks(session, requestedPage) {
   const { page, total, items } = pageOf(session, requestedPage);
-  const { counts } = session;
+  const counts = session.counts || {};
 
   const header = [
     section(
@@ -182,68 +196,60 @@ function updatePageBlocks(session, requestedPage) {
   ];
 
   if (!session.items.length) {
-    return [...header, section(':white_check_mark: Every Sigma rule in this space is up to date.')];
+    return compact([
+      header,
+      section(':white_check_mark: Every Sigma rule in this space is up to date.'),
+    ]);
   }
 
-  const body = items.flatMap((item) => {
-    const block = section(
-      `*${esc(item.name)}*\n${changeSummary(item.changes)}`
-    );
-    const action = actionFor(session, page, item);
-    if (action) block.accessory = action;
+  const body = items.map((item) =>
+    ruleBlocks(session, page, item, {
+      title: `*${esc(item.name)}*\n${changeSummary(item.changes) || '_no field-level changes_'}`,
+    })
+  );
 
-    const note = stateNote(item);
-    return [block, context(note || changeDetail(item.changes))];
-  });
-
-  return [...header, { type: 'divider' }, ...body, ...pagerFooter(session, page, total)];
+  return compact([header, divider(), body, pagerFooter(session, page, total)]);
 }
 
 /** /sigma search - one page of matching Sigma rules */
 function searchPageBlocks(session, requestedPage) {
   const { page, total, items } = pageOf(session, requestedPage);
 
-  const header = [
-    section(
-      `*Sigma rules matching* \`${esc(session.query)}\`\n` +
-        `${session.items.length} result(s) in space \`${esc(session.spaceName || session.spaceId)}\``
-    ),
-  ];
+  const header = section(
+    `*Sigma rules matching* \`${esc(session.query)}\`\n` +
+      `${session.items.length} result(s) in space \`${esc(session.spaceName || session.spaceId)}\``
+  );
 
   if (!session.items.length) {
-    return [
-      ...header,
+    return compact([
+      header,
       section(
         'Nothing matched. Try a shorter keyword — search looks at the rule title and description.'
       ),
-    ];
+    ]);
   }
 
-  const body = items.flatMap((item) => {
+  const body = items.map((item) => {
     const level = item.level ? ` · _${esc(item.level)}_` : '';
-    const block = section(`*${esc(item.title)}*${level}\n${esc(short(item.description, 220))}`);
-    const action = actionFor(session, page, item);
-    if (action) block.accessory = action;
-
-    const note = stateNote(item);
-    const detail = item.changes?.length ? changeDetail(item.changes) : null;
-    return [block, context(note || detail || `\`${esc(item.ruleId)}\``)];
+    return ruleBlocks(session, page, item, {
+      title: `*${esc(item.title)}*${level}\n${esc(short(item.description, 220))}`,
+    });
   });
 
-  return [...header, { type: 'divider' }, ...body, ...pagerFooter(session, page, total)];
+  return compact([header, divider(), body, pagerFooter(session, page, total)]);
 }
 
 /** /sigma status */
 function statusBlocks({ meta, count }) {
   if (!meta) {
-    return [
+    return compact([
       section(
         ':warning: The Sigma database has no sync recorded. Run `npm run update-sigmaDB` on the host.'
       ),
-    ];
+    ]);
   }
 
-  return [
+  return compact([
     section(`*Sigma database* — ${count} rule(s)`),
     context(
       `Synced ${esc(new Date(meta.syncedAt).toISOString())} · ` +
@@ -251,7 +257,7 @@ function statusBlocks({ meta, count }) {
         `Backend \`${esc(meta.backend)}\` · pipeline \`${esc(meta.pipeline)}\` · ` +
         `${meta.skipped} rule(s) skipped at sync time`
     ),
-  ];
+  ]);
 }
 
 /** Plain-text fallback, for notifications and clients that don't render blocks */

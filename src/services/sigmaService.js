@@ -2,7 +2,9 @@
 
 const config = require('../../config');
 const db = require('../sigma/db');
+const { STATE } = require('../sigma/state');
 const { diffRule, buildPatch, buildCreateBody } = require('../sigma/ruleDiff');
+const { unquote } = require('../sigma/parse');
 const { createElasticClient } = require('../elastic');
 const { getSpaceName } = require('./spaceService');
 const { UserFacingError, describeAxiosError } = require('../util/errors');
@@ -22,32 +24,25 @@ const SIGMA_USAGE =
   '*Usage:* `/sigma <subcommand>`\n' +
   '• `/sigma update [space:<id>]` - compare every detection rule in a space against the ' +
   'Sigma database and offer to update the ones that have drifted\n' +
-  "• `/sigma search <keyword> [space:<id>]` - find Sigma rules by title or description\n" +
+  '• `/sigma search <keyword> [space:<id>]` - find Sigma rules by title or description\n' +
   '• `/sigma status` - when the database was last synced\n' +
   '_e.g._ `/sigma search brute force space:soc`';
 
-/** State a searched rule can be in, relative to the selected space */
-const STATE = Object.freeze({
-  UNKNOWN: 'unknown', // not looked up yet - resolved lazily, one page at a time
-  MISSING: 'missing', // not in the stack: offer Add
-  OUTDATED: 'outdated', // in the stack and drifted: offer Update
-  CURRENT: 'current', // in the stack and up to date: offer View
-  BLOCKED: 'blocked', // in the stack but Elastic-managed: nothing we can do
-
-  // Terminal states, set after a button is clicked. They keep the page
-  // honest on re-render without another round trip to Elastic
-  UPDATED: 'updated',
-  ADDED: 'added',
-  FAILED: 'failed',
-});
-
-/** Strip one layer of matching quotes, so `/sigma search 'brute force'` works */
-function unquote(value) {
-  const s = String(value || '').trim();
-  return /^(["']).*\1$/.test(s) ? s.slice(1, -1) : s;
-}
+/** Longest keyword worth sending at a LIKE over a few thousand titles */
+const MAX_QUERY_LENGTH = 200;
 
 const SUBCOMMANDS = new Set(['update', 'search', 'status', 'help']);
+
+/**
+ * Sigma ids are UUIDs, and case is not meaningful in one.
+ *
+ * The database stores them as sigma-cli emitted them and Kibana stores whatever
+ * it was handed, so every comparison between the two sides goes through here
+ * rather than relying on the two having agreed
+ */
+function normalizeRuleId(value) {
+  return String(value || '').trim().toLowerCase();
+}
 
 /**
  * Parse the slash command text.
@@ -75,7 +70,7 @@ function parseSigmaCommand(text) {
     else rest.push(token);
   }
 
-  return { sub, query: unquote(rest.join(' ')), spaceId };
+  return { sub, query: unquote(rest.join(' ')).slice(0, MAX_QUERY_LENGTH), spaceId };
 }
 
 /** Guard every entry point that needs the database, with an actionable message */
@@ -101,23 +96,31 @@ async function listSpaces(apiKey) {
  *
  * Paged rather than asked for in one go: Kibana's _find caps per_page, and a
  * mature stack has thousands of rules. maxStackRules is the circuit breaker -
- * it stops one command walking a cluster forever
+ * it stops one command walking a cluster forever.
+ *
+ * A short page ends the walk. The old condition only looked at `total`, so a
+ * stack that reported a stale total kept asking for pages that came back empty
  */
 async function loadStackRules(client, spaceId) {
   const perPage = config.sigma.stackPageSize;
+  const max = config.sigma.maxStackRules;
   const rules = [];
   let page = 1;
-  let total = Infinity;
+  let total = 0;
 
-  while (rules.length < total && rules.length < config.sigma.maxStackRules) {
+  while (rules.length < max) {
     const result = await client.findDetectionRules(spaceId, { page, perPage });
-    total = result.total ?? 0;
-    if (!result.data?.length) break;
-    rules.push(...result.data);
+    total = result.total ?? total;
+
+    const batch = result.data || [];
+    if (!batch.length) break;
+    rules.push(...batch);
+
+    if (batch.length < perPage || rules.length >= total) break;
     page += 1;
   }
 
-  return { rules, total, truncated: total > rules.length };
+  return { rules, total, truncated: rules.length < total };
 }
 
 /**
@@ -146,7 +149,7 @@ async function compareSpace(apiKey, spaceId) {
   let matched = 0;
 
   for (const stackRule of withRuleId) {
-    const sigma = sigmaRules.get(stackRule.rule_id);
+    const sigma = sigmaRules.get(normalizeRuleId(stackRule.rule_id));
     if (!sigma) continue;
     matched += 1;
 
@@ -192,7 +195,9 @@ async function compareSpace(apiKey, spaceId) {
 /** /sigma search: keyword over the database. Stack state is resolved per page */
 async function searchSigmaRules(query) {
   requireDatabase();
-  if (!query) throw new UserFacingError('Give me something to search for, e.g. `/sigma brute force`.');
+  if (!query) {
+    throw new UserFacingError('Give me something to search for, e.g. `/sigma brute force`.');
+  }
 
   const rules = await db.searchRules(query, config.sigma.maxSearchResults);
 
@@ -288,7 +293,15 @@ async function updateStackRule(apiKey, spaceId, ruleId) {
   }
 
   const changes = diffRule(stackRule, sigma.converted);
-  if (!changes.length) return { ruleId, name: stackRule.name, changes: [], alreadyCurrent: true };
+  if (!changes.length) {
+    return {
+      ruleId,
+      name: stackRule.name,
+      stackId: stackRule.id,
+      changes: [],
+      alreadyCurrent: true,
+    };
+  }
 
   const patch = buildPatch(stackRule, sigma.converted);
   try {
@@ -303,7 +316,13 @@ async function updateStackRule(apiKey, spaceId, ruleId) {
     fields: changes.map((c) => c.field),
   });
 
-  return { ruleId, name: sigma.converted.name || stackRule.name, changes, alreadyCurrent: false };
+  return {
+    ruleId,
+    name: sigma.converted.name || stackRule.name,
+    stackId: stackRule.id,
+    changes,
+    alreadyCurrent: false,
+  };
 }
 
 /** Create a rule the space doesn't have. Disabled by default - see config.sigma */
@@ -336,9 +355,20 @@ async function createStackRule(apiKey, spaceId, ruleId) {
   return { ruleId, name: created.name, stackId: created.id, enabled: config.sigma.enableNewRules };
 }
 
-/** Display name for a space id, for the headings. Never fails the command */
+/**
+ * Display name for a space id, for the headings.
+ *
+ * Never fails the command: spaceService swallows a lookup failure and falls
+ * back to the id, and a missing API key is caught here for the same reason -
+ * losing a whole result set over a cosmetic heading is a bad trade
+ */
 async function resolveSpaceName(apiKey, spaceId) {
-  return getSpaceName(spaceId, createElasticClient(apiKey));
+  try {
+    return await getSpaceName(spaceId, createElasticClient(apiKey));
+  } catch (err) {
+    log.warn('space name lookup failed - using the id', { err, spaceId });
+    return spaceId;
+  }
 }
 
 /** For `/sigma status` */
@@ -350,7 +380,8 @@ async function getSyncStatus() {
 
 module.exports = {
   SIGMA_USAGE,
-  STATE,
+  STATE, // re-exported: it lives in sigma/state.js so the block kit can have it too
+  normalizeRuleId,
   parseSigmaCommand,
   listSpaces,
   compareSpace,
