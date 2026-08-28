@@ -67,6 +67,13 @@ describe('config validation', () => {
       alerts: { enabled: true },
       cases: { enabled: true, spaces: ['default'], perPage: 25 },
     },
+    sigma: {
+      pageSize: 10,
+      stackPageSize: 100,
+      maxStackRules: 5000,
+      databaseUrl: 'file:/tmp/does-not-exist.db',
+      enableNewRules: false,
+    },
   });
 
   const check = (mutate) => {

@@ -57,9 +57,22 @@ function caseLinkForIncident(rec) {
   return isAbsoluteHttpUrl(built) ? built : null;
 }
 
+/**
+ * Link to a detection rule's page in the Security app.
+ *
+ * Keyed on the rule's Kibana `id`, not its `rule_id` - the UI routes on the
+ * former
+ */
+function ruleUrl(spaceId, id) {
+  const base = (config.elastic.kibanaPublicUrl || '').replace(/\/$/, '');
+  const space = spaceId && spaceId !== DEFAULT_SPACE ? `/s/${encodeURIComponent(spaceId)}` : '';
+  return `${base}${space}/app/security/rules/id/${encodeURIComponent(id)}`;
+}
+
 module.exports = {
   caseUrl,
   caseLinkForIncident,
+  ruleUrl,
   isAbsoluteHttpUrl,
   APP_PATH_BY_OWNER,
   DEFAULT_APP_PATH,

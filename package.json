@@ -7,13 +7,22 @@
   "scripts": {
     "start": "node app.js",
     "dev": "node --watch app.js",
+    "update-sigmaDB": "node scripts/update-sigma-db.js",
+    "sigma:setup": "node scripts/sigma-setup.js",
     "check": "npm run lint && npm run check:syntax",
     "check:syntax": "node scripts/check-syntax.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "test:integration": "jest --config jest.integration.config.js",
+    "test:live": "scripts/test-stack.sh up && npm run test:integration",
+    "stack:up": "scripts/test-stack.sh up",
+    "stack:up:no-kibana": "scripts/test-stack.sh up --no-kibana",
+    "stack:down": "scripts/test-stack.sh down",
+    "stack:reset": "scripts/test-stack.sh reset",
+    "stack:status": "scripts/test-stack.sh status"
   },
   "engines": {
     "node": ">=18"
@@ -21,10 +30,12 @@
   "dependencies": {
     "@slack/bolt": "^3.22.0",
     "axios": "^1.19.0",
-    "dotenv": "^16.4.5"
+    "@prisma/client": "^5.22.0",
+    "js-yaml": "^4.3.1"
   },
   "devDependencies": {
     "eslint": "^8.57.0",
+    "prisma": "^5.22.0",
     "jest": "^29.7.0"
   }
 }

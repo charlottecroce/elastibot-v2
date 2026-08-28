@@ -1,0 +1,298 @@
+# ---------------------------------------------------------------------------
+# Elastibot configuration
+#
+#   cp elastibot.example.yml elastibot.yml
+#   chmod 600 elastibot.yml          # it holds credentials. see below
+#
+# This is the only config file. Secrets live here too
+#
+# Nearly every setting has a default. Only the settings marked REQUIRED have to be filled in.
+#
+# PERMISSIONS. This file holds three Slack tokens, an Elastic API key and the
+# key that encrypts analysts' stored credentials at rest. `cp` inherits your
+# umask, which on most distributions leaves it world-readable, so chmod it.
+# Elastibot checks the mode at boot and warns if it's readable by anyone but
+# its owner.
+#
+# ${VAR} interpolation is available if your deployment already injects secrets
+# into the environment and you'd rather not write them down twice:
+#
+#   bot_token: ${SLACK_BOT_TOKEN}
+#   bot_token: ${SLACK_BOT_TOKEN:none}    # with a fallback
+#
+# Nested and dotted keys mean the same thing, as in elasticsearch.yml:
+#
+#   elastic:
+#     timeout_ms: 15000       ==       elastic.timeout_ms: 15000
+#
+# Every setting also has an environment-variable override, named in the
+# comments below, for containers that would rather inject a value than mount a
+# file. Nothing reads a .env file to populate those - they have to be exported.
+# If a setting is set in BOTH places, THIS FILE WINS and the bot logs a warning
+# at boot naming the variable that did nothing.
+# ---------------------------------------------------------------------------
+
+
+# --- Slack -----------------------------------------------------------------
+# All three come from api.slack.com/apps after you install the app:
+#   signing_secret  Basic Information > Signing Secret
+#   app_token       Basic Information > App-Level Tokens, scope connections:write
+#   bot_token       Install App > Bot User OAuth Token
+slack:
+  bot_token: xoxb-your-bot-token           # REQUIRED
+  signing_secret: your-signing-secret      # REQUIRED
+  app_token: xapp-your-app-level-token     # REQUIRED in Socket Mode
+
+  # Socket Mode needs no public URL and no inbound firewall rule, which is
+  # what you want for an internal deployment. false runs an HTTP server on
+  # `port` instead, and you then have to set request URLs in the Slack app
+  socket_mode: true                        # SLACK_SOCKET_MODE
+  port: 3000                               # PORT. only used when socket_mode is false
+
+
+# --- Elastic ---------------------------------------------------------------
+elastic:
+  # REQUIRED. The endpoints the BOT calls. Must be the instances your API keys
+  # authenticate against - usually a direct node rather than a proxy
+  kibana_url: https://kibana.internal:5601         # KIBANA_URL
+  elasticsearch_url: https://es.internal:9200      # ELASTICSEARCH_URL
+
+  # The endpoint a BROWSER reaches. Every case link posted into Slack is built
+  # from this one. If your analysts get at Kibana through a proxy and you leave
+  # this unset, every link points at the internal hostname and clicking one
+  # forces a re-login. Defaults to kibana_url
+  kibana_public_url: https://kibana.example.com    # KIBANA_PUBLIC_URL
+
+  # Encoded API key used for work that isn't attributable to an analyst:
+  service_api_key: base64EncodedApiKey=            # ELASTIC_SERVICE_API_KEY
+
+  # Index pattern searched to resolve an alert by ID
+  alerts_index: .alerts-security.alerts-*          # ALERTS_INDEX
+  # Fallback when the owner can't be derived from the alert's rule consumer
+  default_case_owner: securitySolution             # DEFAULT_CASE_OWNER
+
+  # false skips TLS verification. Reasonable for an internal cluster with a
+  # self-signed cert, not otherwise. Logs a warning at boot when off
+  tls_reject_unauthorized: true                    # ELASTIC_TLS_REJECT_UNAUTHORIZED
+
+  timeout_ms: 15000                                # ELASTIC_TIMEOUT_MS
+  # Retries apply to READ requests only
+  # Note (retries + 1) x timeout_ms is the worst case for a single call. Keep it
+  # below watchers.poll_ms or ticks get skipped under load; boot warns if not
+  retries: 2                                       # ELASTIC_RETRIES
+  retry_base_ms: 250                               # ELASTIC_RETRY_BASE_MS
+  max_sockets: 50                                  # ELASTIC_MAX_SOCKETS. pool per host
+  max_response_bytes: 52428800                     # ELASTIC_MAX_RESPONSE_BYTES
+
+# --- Watchers and channel routing ------------------------------------------
+watchers:
+  enabled: true                # WATCHERS_ENABLED
+  poll_ms: 60000               # WATCH_POLL_MS. under 5s is load for no benefit
+  # Randomise each interval by +/- this fraction, so two replicas started by
+  # the same deploy don't hit Elastic in lockstep forever
+  jitter_ratio: 0.1            # WATCH_JITTER_RATIO
+  # Alerts pulled per poll. Keep it above a plausible burst size, so a spike is
+  # grouped in one pass instead of split across two
+  fetch_size: 200              # WATCH_FETCH_SIZE
+  # Gap between channel posts within a tick. Slack's channel limit is about one
+  # message a second; a burst of 50 incidents at 300ms takes 15s, at 0 it 429s
+  post_delay_ms: 300           # WATCH_POST_DELAY_MS
+
+  # Where anything unrouted lands
+  default_channel: C0123456789 # DEFAULT_CHANNEL
+
+  # Elastic space ID -> Slack channel ID.
+  channel_routing:
+    # soc-1: C0123456789
+    # soc-2: C0987654321
+
+  alerts:
+    enabled: true              # WATCH_ALERTS_ENABLED
+
+  cases:
+    enabled: true              # WATCH_CASES_ENABLED
+    # Cases are polled per space through the Kibana Cases API
+    spaces:                    # WATCH_CASE_SPACES
+      - default
+    per_page: 25               # WATCH_CASES_PER_PAGE
+
+
+# --- Grouping --------------------------------------------------------------
+# A burst of alerts from the same user on the same host, close together, is one
+# incident, even across different rules
+grouping:
+  # Measured from the FIRST alert in a cluster, not the previous one, so a slow
+  # trickle can't grow a cluster forever
+  window_ms: 3600000           # GROUP_WINDOW_MS. 1h
+  # Pass 2: fold service-account clusters into the human cluster they overlap
+  # on the same host. This is what stops one session becoming two cases
+  merge_machine_users: true    # GROUP_MERGE_MACHINE_USERS
+  max_alerts: 200              # GROUP_MAX_ALERTS. ceiling on alerts folded into one case
+
+  # Identities treated as machine rather than human. Globs allowed; the domain
+  # prefix is stripped before matching, so NT AUTHORITY\SYSTEM matches SYSTEM.
+  # Names ending in $ (AD computer accounts) always match, listed or not.
+  #
+  # If you have service accounts on some other prefix, add it here
+  machine_users:               # GROUP_MACHINE_USERS
+    - SYSTEM
+    - LOCAL SERVICE
+    - NETWORK SERVICE
+    - LOCAL SYSTEM
+    - ANONYMOUS LOGON
+    - root
+    - daemon
+    - nobody
+    - svc_*
+    - svc-*
+    - sa_*
+    - _*
+
+
+# --- Incidents -------------------------------------------------------------
+# How long a posted incident stays live and updatable, which is what lets a
+# burst spread across many poll ticks stay one message with one case
+incidents:
+  # No new alerts for this long and the record is reaped; the next alert on that
+  # host starts fresh with a green Create case button.
+  idle_ms: 28800000            # INCIDENT_IDLE_MS. 8h
+  # Hard ceiling regardless of activity. Without it a host trickling one alert
+  # every 7 hours builds an incident that never ends
+  max_lifetime_ms: 86400000    # INCIDENT_MAX_LIFETIME_MS. 24h
+  # How long a create-case claim is honoured before it's treated as abandoned
+  claim_ttl_ms: 60000          # INCIDENT_CLAIM_TTL_MS
+
+
+# --- Case titles -----------------------------------------------------------
+naming:
+  # Truncate the rule name in a case title to N words. Unset uses it whole
+  # rule_words: 6              # CASE_TITLE_RULE_WORDS
+  # Defaults to stats.timezone
+  timezone: America/New_York   # CASE_TITLE_TIMEZONE
+
+
+# --- /stats ----------------------------------------------------------------
+stats:
+  default_window: 7d           # STATS_DEFAULT_WINDOW. used when /stats gets no window
+  max_window_days: 90          # STATS_MAX_WINDOW_DAYS. hard cap
+  # Hour-of-day and day-of-week are bucketed in this zone. Set it to your SOC's
+  # timezone or "busiest hour" doesn't mean anything
+  timezone: America/New_York   # STATS_TIMEZONE
+  top_n: 10                    # STATS_TOP_N
+  noise_min_alerts: 10         # STATS_NOISE_MIN_ALERTS. floor before a rule counts as noisy
+  # The field most likely to need changing. If a terms aggregation complains
+  # about fielddata, the field is `text` in your mapping and wants .keyword
+  process_field: process.name  # STATS_PROCESS_FIELD
+
+
+# --- Secrets and local storage ---------------------------------------------
+security:
+  # REQUIRED in practice. 32+ chars, encrypts each analyst's Elastic API key at
+  # rest (AES-256-GCM, scrypt, per-value salt). Unset means keys are stored in
+  # PLAINTEXT and the bot warns about it every boot.
+  #   openssl rand -hex 16
+  secret_key: change-me-to-a-long-random-string   # ELASTIBOT_SECRET_KEY
+
+  # Write-through JSON stores. Gitignored
+  user_store_path: ./data/users.json     # USER_STORE_PATH
+  state_path: ./data/state.json          # STATE_PATH
+  incident_store_path: ./data/incidents.json  # INCIDENT_STORE_PATH
+
+  # Slack user IDs allowed to use /start's "create one for me", which has
+  # Elastibot call POST /_security/api_key itself rather than the analyst
+  # pasting a key from Kibana. Empty disables the option for everyone.
+  #
+  # Slack-side gating only. Elasticsearch separately enforces
+  # that the admin credential pasted into that option really holds
+  # manage_api_key; one that doesn't is rejected whatever this list says
+  auto_provision_slack_ids: []           # AUTO_PROVISION_SLACK_IDS
+
+
+# --- Logging ---------------------------------------------------------------
+logging:
+  level: info                  # LOG_LEVEL. trace|debug|info|warn|error|fatal|silent
+  format: json                 # LOG_FORMAT. json / pretty
+  # Leave this on. Secrets are redacted from log records; only turn it off to debug
+  redact: true                 # LOG_REDACT
+
+
+# --- Caching ---------------------------------------------------------------
+cache:
+  # Space names change very rarely.
+  space_name_ttl_ms: 3600000   # SPACE_NAME_TTL_MS
+  # Per-analyst clients are reused rather than rebuilt per command. Expiry
+  # bounds how long a revoked key still has a live client
+  elastic_client_ttl_ms: 900000  # ELASTIC_CLIENT_TTL_MS
+  elastic_max_clients: 250       # ELASTIC_MAX_CLIENTS
+  # Decrypted user records. Bounds how long a rotated key lingers in memory
+  user_ttl_ms: 300000            # USER_CACHE_TTL_MS
+
+
+# --- Shutdown --------------------------------------------------------------
+# How long shutdown gets to drain watchers and flush stores before a hard exit
+shutdown_timeout_ms: 15000     # SHUTDOWN_TIMEOUT_MS
+
+# --- Sigma -----------------------------------------------------------------
+# The rule database `npm run update-sigmaDB` builds, and the /sigma command
+# that reads it. Delete this whole block if you don't use the feature - every
+# setting in it has a working default.
+#
+# Building the database needs git, python3 with venv, and network access to
+# GitHub and PyPI. The bot itself needs none of those; it only reads the
+# sqlite file the sync produced.
+sigma:
+  repo_url: https://github.com/SigmaHQ/sigma.git   # SIGMA_REPO_URL
+  repo_ref: master                                 # SIGMA_REPO_REF
+  repo_path: ./data/sigma-repo                     # SIGMA_REPO_PATH. shallow clone
+
+  # Which subdirectories of the repo to convert. The emerging-threats and
+  # threat-hunting sets are considerably noisier than the core rules; drop
+  # them here rather than filtering later
+  rule_dirs:                                       # SIGMA_RULE_DIRS
+    - rules
+    - rules-emerging-threats
+    - rules-threat-hunting
+
+  # sigma-cli is installed into its own virtualenv on first sync
+  venv_path: ./data/sigvenv                        # SIGMA_VENV_PATH
+  python: python3                                  # SIGMA_PYTHON
+
+  # These have to match the data your rules will run against. ecs_windows
+  # rules compared against Linux logs will report drift on `query` forever.
+  #
+  # `backend` is a conversion TARGET and `plugin` is the package that provides
+  # it - not the same thing, and only sometimes the same word. The lucene, eql
+  # and esql targets all come from the elasticsearch plugin. `sigma plugin
+  # list` in the virtualenv shows the identifiers
+  backend: lucene                                  # SIGMA_BACKEND
+  plugin: elasticsearch                            # SIGMA_PLUGIN
+  pipeline: ecs_windows                            # SIGMA_PIPELINE
+  format: siem_rule_ndjson                         # SIGMA_FORMAT
+
+  # Rules per `sigma convert` process. A batch containing a rule the backend
+  # can't express is retried one file at a time, so this is a speed knob only
+  convert_batch: 200                               # SIGMA_CONVERT_BATCH
+  command_timeout_ms: 900000                       # SIGMA_COMMAND_TIMEOUT_MS
+
+  # The sqlite file. Make it ABSOLUTE if you set it - the Prisma CLI resolves
+  # a relative path against prisma/, and the app against the working
+  # directory, which is two different files. Unset means <cwd>/data/sigma.db
+  # database_url: file:/opt/elastibot/data/sigma.db   # SIGMA_DATABASE_URL
+
+  # Results per Slack message. A message caps at 50 blocks and each result
+  # costs two, so above about 20 it simply stops rendering
+  page_size: 10                                    # SIGMA_PAGE_SIZE
+  # How long the Back/Next buttons on a result set keep working
+  session_ttl_ms: 900000                           # SIGMA_SESSION_TTL_MS
+  max_sessions: 200                                # SIGMA_MAX_SESSIONS
+  max_search_results: 200                          # SIGMA_MAX_SEARCH_RESULTS
+
+  # Page size for the detection-rule sweep /sigma update does, and the
+  # circuit breaker on how far it will walk a large stack
+  stack_page_size: 100                             # SIGMA_STACK_PAGE_SIZE
+  max_stack_rules: 5000                            # SIGMA_MAX_STACK_RULES
+
+  # Whether a rule added by /sigma search starts enabled. Leave this off. A
+  # freshly converted rule has never run against your data and its index
+  # patterns are whatever the pipeline guessed
+  enable_new_rules: false                          # SIGMA_ENABLE_NEW_RULES

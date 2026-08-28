@@ -1,0 +1,64 @@
+// SigmaDB - one SQLite file holding every Sigma rule, already converted to the
+// Elasticsearch detection-rule shape. Written only by `npm run update-sigmaDB`;
+// the bot reads it.
+//
+// The url is also passed explicitly at runtime by src/sigma/db.js, so a
+// relative path here can never disagree with the one the app opens.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("SIGMA_DATABASE_URL")
+}
+
+model SigmaRule {
+  // The Sigma rule UUID. This is the value sigma-cli writes into the converted
+  // rule's `rule_id`, which is what we match Elasticsearch rules on
+  ruleId      String   @id
+  title       String
+  description String?
+  level       String?
+  status      String?
+
+  // JSON arrays, stored as text - SQLite has no array type and nothing joins on these
+  tags        String   @default("[]")
+
+  // Where the rule came from, and a hash of the yaml, so a re-run can tell what
+  // actually changed instead of rewriting every row
+  sourcePath  String
+  sourceHash  String
+
+  // The converted Elasticsearch rule, as JSON
+  converted   String
+
+  // Hash of just the fields we sync to a stack rule. Lets /sigma update skip
+  // work cheaply when nothing meaningful moved
+  contentHash String
+
+  // What produced `converted` - a backend or pipeline change invalidates it
+  backend     String
+  pipeline    String
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([title])
+  @@index([contentHash])
+}
+
+// One row. Describes the last successful sync, for `/sigma` to show and for an
+// operator to sanity-check
+model SigmaMeta {
+  id        Int      @id @default(1)
+  repoUrl   String
+  repoRef   String
+  commit    String?
+  backend   String
+  pipeline  String
+  ruleCount Int
+  skipped   Int      @default(0)
+  syncedAt  DateTime
+}

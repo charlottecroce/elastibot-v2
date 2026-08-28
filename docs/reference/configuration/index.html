@@ -76,7 +76,11 @@
               <ul class="current">
                   <li class="toctree-l1 current"><a class="reference internal current" href="#">Configuration</a>
     <ul class="current">
-    <li class="toctree-l2"><a class="reference internal" href="#settings-files">Settings files</a>
+    <li class="toctree-l2"><a class="reference internal" href="#the-settings-file">The settings file</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#where-a-setting-comes-from">Where a setting comes from</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#writing-the-file">Writing the file</a>
     </li>
     <li class="toctree-l2"><a class="reference internal" href="#validation-at-boot">Validation at boot</a>
     </li>
@@ -90,11 +94,11 @@
     </li>
     <li class="toctree-l2"><a class="reference internal" href="#stats">Stats</a>
     </li>
+    <li class="toctree-l2"><a class="reference internal" href="#case-titles">Case titles</a>
+    </li>
     <li class="toctree-l2"><a class="reference internal" href="#security-and-storage">Security and storage</a>
     </li>
-    <li class="toctree-l2"><a class="reference internal" href="#caching">Caching</a>
-    </li>
-    <li class="toctree-l2"><a class="reference internal" href="#logging">Logging</a>
+    <li class="toctree-l2"><a class="reference internal" href="#logging-caching-shutdown">Logging, caching, shutdown</a>
     </li>
     </ul>
                   </li>
@@ -131,52 +135,86 @@
             <div class="section" itemprop="articleBody">
               
                 <h1 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h1>
-<h2 id="settings-files">Settings files<a class="headerlink" href="#settings-files" title="Permanent link">&para;</a></h2>
-<ul>
-<li><strong><code>.env</code></strong> - secrets only. Gitignored. Copy <code>.env.example</code>.</li>
-<li><strong><code>config/index.js</code></strong> - every setting, with a default for each. This is the file you edit for a deployment (other than <code>.env</code>). Most values read an env var and fall back, so you can override from either side.</li>
-</ul>
-<p>A few things only exist in <code>config/index.js</code> because they're structured rather than scalar - <code>channelRouting</code> most notably.</p>
-<p>Env parsing helpers (<code>bool</code>, <code>int</code>, <code>num</code>, <code>list</code>) throw on malformed input. An empty string falls back to the default rather than being treated as a value.</p>
+<h2 id="the-settings-file">The settings file<a class="headerlink" href="#the-settings-file" title="Permanent link">&para;</a></h2>
+<p>Every setting lives in <code>elastibot.yml</code>, secrets included. Gitignored</p>
+<pre class="codehilite"><code class="language-bash">cp elastibot.example.yml elastibot.yml
+chmod 600 elastibot.yml
+</code></pre>
+
+<p>The file holds three Slack tokens, the Elastic service API key and the key that encrypts analysts' stored credentials at rest. Elastibot checks the mode at boot and warns if it's readable by anyone but its owner.</p>
+<p>Every setting appears in <code>elastibot.yml</code>, with its default, a comment on what it's for, and the name of its environment variable. The tables below are a quick index rather than a substitute for reading it.</p>
+<p>Five settings are required: the three Slack secrets, <code>elastic.kibana_url</code> and <code>elastic.elasticsearch_url</code>. Everything else has a default, so deleting a section you're happy with is a viable way of using the file.</p>
+<h2 id="where-a-setting-comes-from">Where a setting comes from<a class="headerlink" href="#where-a-setting-comes-from" title="Permanent link">&para;</a></h2>
+<p>Highest priority first:</p>
+<ol>
+<li><code>elastibot.yml</code></li>
+<li>an environment variable</li>
+<li>the built-in default in <code>config/index.js</code></li>
+</ol>
+<h2 id="writing-the-file">Writing the file<a class="headerlink" href="#writing-the-file" title="Permanent link">&para;</a></h2>
+<p>Nested and dotted keys are the same thing, as in <code>elasticsearch.yml</code>:</p>
+<pre class="codehilite"><code class="language-yaml">elastic:
+  timeout_ms: 15000
+
+# identical to
+elastic.timeout_ms: 15000
+</code></pre>
+
+<p>If your deployment already injects secrets into the environment, you can reference them instead of writing them down a second time:</p>
+<pre class="codehilite"><code class="language-yaml">slack:
+  bot_token: ${SLACK_BOT_TOKEN}
+  app_token: ${SLACK_APP_TOKEN:none}   # ${VAR:fallback}
+</code></pre>
+
+<p>An unset <code>${VAR}</code> with no fallback is treated as <em>not configured</em> rather than as an error, so it falls through to the default and, if the setting is required, gets reported by the normal boot validation. A <code>${VAR}</code> that resolves is not counted as the file shadowing that variable, for the obvious reason.</p>
+<p><code>ELASTIBOT_CONFIG</code> points at a file somewhere other than <code>./elastibot.yml</code>.</p>
 <h2 id="validation-at-boot">Validation at boot<a class="headerlink" href="#validation-at-boot" title="Permanent link">&para;</a></h2>
 <p><code>config/validate.js</code> runs before anything connects. It throws a <code>ConfigError</code> listing <strong>everything</strong> that's wrong, so you fix it all in one pass.</p>
 <p>It also emits warnings for things that are legal but suspicious, including some that are computed rather than looked up:</p>
 <ul>
-<li>worst-case Elastic call duration <code>(ELASTIC_RETRIES + 1) × ELASTIC_TIMEOUT_MS</code> at or above <code>WATCH_POLL_MS</code>, which means ticks get skipped under load</li>
-<li><code>WATCH_POLL_MS</code> under 5s - more load for no benefit</li>
-<li><code>WATCH_POST_DELAY_MS</code> under 100 - a burst of 50 incidents is a guaranteed 429</li>
+<li><code>elastibot.yml</code> being readable by anyone other than its owner</li>
+<li>a setting present in both <code>elastibot.yml</code> and the environment</li>
+<li>worst-case Elastic call duration <code>(retries + 1) × timeout_ms</code> at or above <code>watchers.poll_ms</code>, which means ticks get skipped under load</li>
+<li><code>watchers.poll_ms</code> under 5s - more load for no benefit</li>
+<li><code>watchers.post_delay_ms</code> under 100 - a burst of 50 incidents is a guaranteed 429</li>
 </ul>
 <h2 id="slack">Slack<a class="headerlink" href="#slack" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Var</th>
+<th>Key</th>
+<th>Env</th>
 <th>Default</th>
 <th></th>
 </tr>
 </thead>
 <tbody>
 <tr>
+<td><code>slack.bot_token</code></td>
 <td><code>SLACK_BOT_TOKEN</code></td>
 <td>—</td>
 <td>required, <code>xoxb-</code></td>
 </tr>
 <tr>
+<td><code>slack.signing_secret</code></td>
 <td><code>SLACK_SIGNING_SECRET</code></td>
 <td>—</td>
 <td>required</td>
 </tr>
 <tr>
+<td><code>slack.app_token</code></td>
 <td><code>SLACK_APP_TOKEN</code></td>
 <td>—</td>
 <td>required in Socket Mode, <code>xapp-</code></td>
 </tr>
 <tr>
+<td><code>slack.socket_mode</code></td>
 <td><code>SLACK_SOCKET_MODE</code></td>
 <td><code>true</code></td>
 <td><code>false</code> runs an HTTP server instead</td>
 </tr>
 <tr>
+<td><code>slack.port</code></td>
 <td><code>PORT</code></td>
 <td><code>3000</code></td>
 <td>only used when Socket Mode is off</td>
@@ -187,185 +225,224 @@
 <table>
 <thead>
 <tr>
-<th>Var</th>
+<th>Key</th>
+<th>Env</th>
 <th>Default</th>
 <th></th>
 </tr>
 </thead>
 <tbody>
 <tr>
+<td><code>elastic.kibana_url</code></td>
 <td><code>KIBANA_URL</code></td>
 <td>—</td>
 <td>required. the endpoint <strong>the bot</strong> calls</td>
 </tr>
 <tr>
+<td><code>elastic.kibana_public_url</code></td>
 <td><code>KIBANA_PUBLIC_URL</code></td>
-<td><code>KIBANA_URL</code></td>
+<td><code>kibana_url</code></td>
 <td>the endpoint <strong>a browser</strong> reaches. all Slack links use this</td>
 </tr>
 <tr>
+<td><code>elastic.elasticsearch_url</code></td>
 <td><code>ELASTICSEARCH_URL</code></td>
 <td>—</td>
 <td>required</td>
 </tr>
 <tr>
+<td><code>elastic.service_api_key</code></td>
 <td><code>ELASTIC_SERVICE_API_KEY</code></td>
 <td>—</td>
 <td>encoded key for the watchers and space lookups</td>
 </tr>
 <tr>
+<td><code>elastic.alerts_index</code></td>
 <td><code>ALERTS_INDEX</code></td>
 <td><code>.alerts-security.alerts-*</code></td>
 <td></td>
 </tr>
 <tr>
+<td><code>elastic.default_case_owner</code></td>
 <td><code>DEFAULT_CASE_OWNER</code></td>
 <td><code>securitySolution</code></td>
 <td>fallback when it can't be derived from the alert</td>
 </tr>
 <tr>
+<td><code>elastic.tls_reject_unauthorized</code></td>
 <td><code>ELASTIC_TLS_REJECT_UNAUTHORIZED</code></td>
 <td><code>true</code></td>
 <td><code>false</code> for a self-signed internal cluster</td>
 </tr>
 <tr>
+<td><code>elastic.timeout_ms</code></td>
 <td><code>ELASTIC_TIMEOUT_MS</code></td>
 <td><code>15000</code></td>
 <td></td>
 </tr>
 <tr>
+<td><code>elastic.retries</code></td>
 <td><code>ELASTIC_RETRIES</code></td>
 <td><code>2</code></td>
 <td>reads only. writes are never retried</td>
 </tr>
 <tr>
+<td><code>elastic.retry_base_ms</code></td>
 <td><code>ELASTIC_RETRY_BASE_MS</code></td>
 <td><code>250</code></td>
 <td></td>
 </tr>
 <tr>
+<td><code>elastic.max_sockets</code></td>
 <td><code>ELASTIC_MAX_SOCKETS</code></td>
 <td><code>50</code></td>
 <td>keep-alive pool per host</td>
 </tr>
 <tr>
+<td><code>elastic.max_response_bytes</code></td>
 <td><code>ELASTIC_MAX_RESPONSE_BYTES</code></td>
 <td><code>52428800</code></td>
 <td></td>
 </tr>
+<tr>
+<td><code>elastic.analyst_role_descriptors_path</code></td>
+<td><code>ANALYST_ROLE_DESCRIPTORS_PATH</code></td>
+<td><code>api_permissions/elastibot_analyst.json</code></td>
+<td></td>
+</tr>
 </tbody>
 </table>
-<p><code>analystRoleDescriptors</code> is <code>require</code>d straight from <code>api_permissions/elastibot_analyst.json</code>, so the automatic and manual key-creation paths can't drift apart.</p>
+<p>The role descriptors are read from the same file an admin would otherwise paste into <code>POST /_security/api_key</code> by hand, so the automatic and manual key-creation paths can't drift apart.</p>
 <h2 id="watchers-and-routing">Watchers and routing<a class="headerlink" href="#watchers-and-routing" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Var</th>
+<th>Key</th>
+<th>Env</th>
 <th>Default</th>
 <th></th>
 </tr>
 </thead>
 <tbody>
 <tr>
+<td><code>watchers.enabled</code></td>
 <td><code>WATCHERS_ENABLED</code></td>
 <td><code>true</code></td>
 <td></td>
 </tr>
 <tr>
+<td><code>watchers.poll_ms</code></td>
 <td><code>WATCH_POLL_MS</code></td>
 <td><code>60000</code></td>
 <td></td>
 </tr>
 <tr>
+<td><code>watchers.jitter_ratio</code></td>
 <td><code>WATCH_JITTER_RATIO</code></td>
 <td><code>0.1</code></td>
 <td>±10% per interval, so replicas don't sync up</td>
 </tr>
 <tr>
+<td><code>watchers.fetch_size</code></td>
 <td><code>WATCH_FETCH_SIZE</code></td>
 <td><code>200</code></td>
 <td>keep above a plausible burst size</td>
 </tr>
 <tr>
+<td><code>watchers.post_delay_ms</code></td>
 <td><code>WATCH_POST_DELAY_MS</code></td>
 <td><code>300</code></td>
 <td>Slack rate-limit courtesy</td>
 </tr>
 <tr>
+<td><code>watchers.default_channel</code></td>
 <td><code>DEFAULT_CHANNEL</code></td>
 <td>—</td>
 <td>e.g. <code>C0123456789</code></td>
 </tr>
 <tr>
+<td><code>watchers.alerts.enabled</code></td>
 <td><code>WATCH_ALERTS_ENABLED</code></td>
 <td><code>true</code></td>
 <td></td>
 </tr>
 <tr>
+<td><code>watchers.cases.enabled</code></td>
 <td><code>WATCH_CASES_ENABLED</code></td>
 <td><code>true</code></td>
 <td></td>
 </tr>
 <tr>
+<td><code>watchers.cases.spaces</code></td>
 <td><code>WATCH_CASE_SPACES</code></td>
-<td><code>default</code></td>
-<td>comma-separated space IDs</td>
+<td><code>[default]</code></td>
+<td>space IDs</td>
 </tr>
 <tr>
+<td><code>watchers.cases.per_page</code></td>
 <td><code>WATCH_CASES_PER_PAGE</code></td>
 <td><code>25</code></td>
 <td>page size for the Cases <code>_find</code> call</td>
 </tr>
 </tbody>
 </table>
-<p>Per-space routing is a plain object in <code>config/index.js</code>:</p>
-<pre class="codehilite"><code class="language-js">channelRouting: {
-  'soc': 'C0123456789',
-},
+<p>Per-space routing is a mapping.</p>
+<pre class="codehilite"><code class="language-yaml">watchers:
+  channel_routing:
+    soc-1: C0123456789
+    soc-2: C0987654321
 </code></pre>
 
-<p>Anything unmatched falls through to <code>DEFAULT_CHANNEL</code>.</p>
+<p>Anything unmatched falls through to <code>default_channel</code>.</p>
 <h2 id="grouping-and-incidents">Grouping and incidents<a class="headerlink" href="#grouping-and-incidents" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Var</th>
+<th>Key</th>
+<th>Env</th>
 <th>Default</th>
 <th></th>
 </tr>
 </thead>
 <tbody>
 <tr>
+<td><code>grouping.window_ms</code></td>
 <td><code>GROUP_WINDOW_MS</code></td>
 <td><code>3600000</code></td>
 <td>1h. window measured from the first alert</td>
 </tr>
 <tr>
+<td><code>grouping.merge_machine_users</code></td>
 <td><code>GROUP_MERGE_MACHINE_USERS</code></td>
 <td><code>true</code></td>
 <td>pass 2 on/off</td>
 </tr>
 <tr>
+<td><code>grouping.machine_users</code></td>
 <td><code>GROUP_MACHINE_USERS</code></td>
 <td>see below</td>
-<td>comma-separated, globs allowed</td>
+<td>globs allowed</td>
 </tr>
 <tr>
+<td><code>grouping.max_alerts</code></td>
 <td><code>GROUP_MAX_ALERTS</code></td>
-<td></td>
+<td><code>200</code></td>
 <td>ceiling on alerts folded into one case</td>
 </tr>
 <tr>
+<td><code>incidents.idle_ms</code></td>
 <td><code>INCIDENT_IDLE_MS</code></td>
 <td><code>28800000</code></td>
 <td>8h. no new alerts for this long → reaped</td>
 </tr>
 <tr>
+<td><code>incidents.max_lifetime_ms</code></td>
 <td><code>INCIDENT_MAX_LIFETIME_MS</code></td>
 <td><code>86400000</code></td>
 <td>24h hard ceiling regardless of activity</td>
 </tr>
 <tr>
+<td><code>incidents.claim_ttl_ms</code></td>
 <td><code>INCIDENT_CLAIM_TTL_MS</code></td>
 <td><code>60000</code></td>
 <td>how long a create-case claim is honoured</td>
@@ -378,147 +455,186 @@ root, daemon, nobody, svc_*, svc-*, sa_*, _*
 </code></pre>
 
 <p>This is the one setting here that's specific to your environment's naming conventions. The default is a reasonable starting point.</p>
-<p><code>INCIDENT_IDLE_MS</code> is worth thinking about. It's the thing that decides how long a burst can spread out and still be one message with one case. A shift length is about right.</p>
+<p><code>incidents.idle_ms</code> is worth thinking about. It's the thing that decides how long a burst can spread out and still be one message with one case. A shift length is about right.</p>
 <h2 id="stats">Stats<a class="headerlink" href="#stats" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Var</th>
+<th>Key</th>
+<th>Env</th>
 <th>Default</th>
 <th></th>
 </tr>
 </thead>
 <tbody>
 <tr>
+<td><code>stats.default_window</code></td>
 <td><code>STATS_DEFAULT_WINDOW</code></td>
 <td><code>7d</code></td>
 <td></td>
 </tr>
 <tr>
+<td><code>stats.max_window_days</code></td>
 <td><code>STATS_MAX_WINDOW_DAYS</code></td>
 <td><code>90</code></td>
 <td>hard cap</td>
 </tr>
 <tr>
+<td><code>stats.timezone</code></td>
 <td><code>STATS_TIMEZONE</code></td>
 <td><code>UTC</code></td>
 <td>set it to your SOC's zone</td>
 </tr>
 <tr>
+<td><code>stats.top_n</code></td>
 <td><code>STATS_TOP_N</code></td>
 <td><code>10</code></td>
 <td>entries per "top N" list</td>
 </tr>
 <tr>
+<td><code>stats.noise_min_alerts</code></td>
 <td><code>STATS_NOISE_MIN_ALERTS</code></td>
 <td><code>10</code></td>
 <td>floor before a rule can be called noisy</td>
 </tr>
 <tr>
+<td><code>stats.process_field</code></td>
 <td><code>STATS_PROCESS_FIELD</code></td>
 <td><code>process.name</code></td>
 <td>override if your alerts map it elsewhere</td>
 </tr>
 </tbody>
 </table>
-<p><code>STATS_PROCESS_FIELD</code> is the field most likely to need changing. If a terms aggregation complains about fielddata, the field is <code>text</code> in your mapping and needs a <code>.keyword</code> suffix.</p>
-<h2 id="security-and-storage">Security and storage<a class="headerlink" href="#security-and-storage" title="Permanent link">&para;</a></h2>
+<p><code>stats.process_field</code> is the field most likely to need changing. If a terms aggregation complains about fielddata, the field is <code>text</code> in your mapping and needs a <code>.keyword</code> suffix.</p>
+<h2 id="case-titles">Case titles<a class="headerlink" href="#case-titles" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Var</th>
+<th>Key</th>
+<th>Env</th>
 <th>Default</th>
 <th></th>
 </tr>
 </thead>
 <tbody>
 <tr>
+<td><code>naming.rule_words</code></td>
+<td><code>CASE_TITLE_RULE_WORDS</code></td>
+<td>unset</td>
+<td>truncate the rule name to N words</td>
+</tr>
+<tr>
+<td><code>naming.timezone</code></td>
+<td><code>CASE_TITLE_TIMEZONE</code></td>
+<td><code>stats.timezone</code></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="security-and-storage">Security and storage<a class="headerlink" href="#security-and-storage" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Env</th>
+<th>Default</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>security.secret_key</code></td>
 <td><code>ELASTIBOT_SECRET_KEY</code></td>
 <td>—</td>
-<td>32+ chars. <code>openssl rand -hex 16</code></td>
+<td>32+ chars. unset means keys stored in plaintext</td>
 </tr>
 <tr>
-<td><code>AUTO_PROVISION_SLACK_IDS</code></td>
-<td>empty</td>
-<td>Slack IDs allowed to use <code>/start</code>'s auto-key option</td>
-</tr>
-<tr>
+<td><code>security.user_store_path</code></td>
 <td><code>USER_STORE_PATH</code></td>
 <td><code>./data/users.json</code></td>
 <td></td>
 </tr>
 <tr>
+<td><code>security.state_path</code></td>
 <td><code>STATE_PATH</code></td>
 <td><code>./data/state.json</code></td>
 <td></td>
 </tr>
 <tr>
+<td><code>security.incident_store_path</code></td>
 <td><code>INCIDENT_STORE_PATH</code></td>
 <td><code>./data/incidents.json</code></td>
 <td></td>
 </tr>
 <tr>
-<td><code>SHUTDOWN_TIMEOUT_MS</code></td>
-<td><code>15000</code></td>
-<td>before a hard exit</td>
+<td><code>security.auto_provision_slack_ids</code></td>
+<td><code>AUTO_PROVISION_SLACK_IDS</code></td>
+<td><code>[]</code></td>
+<td>who may use <code>/start</code>'s "create one for me"</td>
 </tr>
 </tbody>
 </table>
-<h2 id="caching">Caching<a class="headerlink" href="#caching" title="Permanent link">&para;</a></h2>
+<h2 id="logging-caching-shutdown">Logging, caching, shutdown<a class="headerlink" href="#logging-caching-shutdown" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Var</th>
-<th>Default</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>USER_CACHE_TTL_MS</code></td>
-<td><code>300000</code></td>
-</tr>
-<tr>
-<td><code>ELASTIC_CLIENT_TTL_MS</code></td>
-<td><code>900000</code></td>
-</tr>
-<tr>
-<td><code>ELASTIC_MAX_CLIENTS</code></td>
-<td><code>250</code></td>
-</tr>
-<tr>
-<td><code>SPACE_NAME_TTL_MS</code></td>
-<td><code>3600000</code></td>
-</tr>
-</tbody>
-</table>
-<h2 id="logging">Logging<a class="headerlink" href="#logging" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Var</th>
+<th>Key</th>
+<th>Env</th>
 <th>Default</th>
 <th></th>
 </tr>
 </thead>
 <tbody>
 <tr>
+<td><code>logging.level</code></td>
 <td><code>LOG_LEVEL</code></td>
-<td><code>info</code> in prod, <code>debug</code> otherwise, <code>silent</code> in tests</td>
-<td><code>trace</code>…<code>fatal</code>, <code>silent</code></td>
+<td><code>info</code> in prod</td>
+<td><code>trace</code>…<code>silent</code></td>
 </tr>
 <tr>
+<td><code>logging.format</code></td>
 <td><code>LOG_FORMAT</code></td>
-<td><code>json</code> in prod, <code>pretty</code> otherwise</td>
-<td></td>
+<td><code>json</code> in prod</td>
+<td><code>pretty</code> for a terminal</td>
 </tr>
 <tr>
+<td><code>logging.redact</code></td>
 <td><code>LOG_REDACT</code></td>
 <td><code>true</code></td>
 <td>leave it on</td>
 </tr>
+<tr>
+<td><code>cache.space_name_ttl_ms</code></td>
+<td><code>SPACE_NAME_TTL_MS</code></td>
+<td><code>3600000</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>cache.elastic_client_ttl_ms</code></td>
+<td><code>ELASTIC_CLIENT_TTL_MS</code></td>
+<td><code>900000</code></td>
+<td>bounds how long a revoked key keeps a client</td>
+</tr>
+<tr>
+<td><code>cache.elastic_max_clients</code></td>
+<td><code>ELASTIC_MAX_CLIENTS</code></td>
+<td><code>250</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>cache.user_ttl_ms</code></td>
+<td><code>USER_CACHE_TTL_MS</code></td>
+<td><code>300000</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>shutdown_timeout_ms</code></td>
+<td><code>SHUTDOWN_TIMEOUT_MS</code></td>
+<td><code>15000</code></td>
+<td>drain watchers and flush stores before a hard exit</td>
+</tr>
 </tbody>
 </table>
-<p><code>LOG_REDACT</code> exists to debug the redactor itself. Never turn it off in production. See <a href="../logging/">Logging and Errors</a>.</p>
               
             </div>
           </div><footer>
