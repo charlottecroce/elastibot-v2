@@ -59,7 +59,7 @@ const str = (v, label) => {
 };
 
 /** A YAML sequence, or (from an env var) a comma-separated string */
-const list = (v, label) => {
+const list = (v, _label) => {
   const items = Array.isArray(v) ? v : String(v).split(',');
   return items.map((s) => String(s).trim()).filter(Boolean);
 };
