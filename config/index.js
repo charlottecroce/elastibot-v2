@@ -15,6 +15,7 @@
  * file to populate them, though; they have to be genuinely exported.
  */
 
+require('path');
 const { loadConfigFile } = require('./loader');
 
 /*
@@ -23,7 +24,7 @@ const { loadConfigFile } = require('./loader');
  * that is actually present
  */
 
-class ConfigValueError extends Error {}
+class ConfigValueError extends Error { }
 
 const fail = (label, value, expected) => {
   throw new ConfigValueError(`${label} must be ${expected}, got ${JSON.stringify(value)}`);
@@ -328,5 +329,88 @@ module.exports = {
       // Page size for the Cases _find call
       perPage: s('watchers.cases.per_page', 'WATCH_CASES_PER_PAGE', int, 25),
     },
+  },
+  
+  // ---------------------------------------------------------------
+  // SIGMA
+  // The rule database `npm run update-sigmaDB` builds, and the /sigma command
+  // that reads it. Nothing here is needed unless you use that feature
+  // ---------------------------------------------------------------
+  sigma: {
+    // --- where the rules come from ---
+    repoUrl: s('sigma.repo_url', 'SIGMA_REPO_URL', str, 'https://github.com/SigmaHQ/sigma.git'),
+    repoRef: s('sigma.repo_ref', 'SIGMA_REPO_REF', str, 'master'),
+    // Cloned shallow. Gitignored alongside the rest of data/
+    repoPath: s('sigma.repo_path', 'SIGMA_REPO_PATH', str, './data/sigma-repo'),
+    // Subdirectories of the repo to walk. The emerging-threats and
+    // threat-hunting sets are noisier than the core rules - drop them here if
+    // you don't want them offered
+    ruleDirs: s('sigma.rule_dirs', 'SIGMA_RULE_DIRS', list, [
+      'rules',
+      'rules-emerging-threats',
+      'rules-threat-hunting',
+    ]),
+
+    // --- conversion ---
+    // The virtualenv sigma-cli is installed into, created on first run
+    venvPath: s('sigma.venv_path', 'SIGMA_VENV_PATH', str, './data/sigvenv'),
+    pythonBin: s('sigma.python', 'SIGMA_PYTHON', str, 'python3'),
+    /*
+     * The conversion TARGET, and the PLUGIN that provides it. These are not the
+     * same thing and are only occasionally the same word: `lucene` comes from
+     * the `elasticsearch` plugin, while `splunk` happens to be both. Installing
+     * a plugin called `lucene` fails with "Plugin with identifier lucene not
+     * found" - see `sigma plugin list`
+     */
+    backend: s('sigma.backend', 'SIGMA_BACKEND', str, 'lucene'),
+    plugin: s('sigma.plugin', 'SIGMA_PLUGIN', str, 'elasticsearch'),
+    pipeline: s('sigma.pipeline', 'SIGMA_PIPELINE', str, 'ecs_windows'),
+    format: s('sigma.format', 'SIGMA_FORMAT', str, 'siem_rule_ndjson'),
+    // Rules per `sigma convert` process. Bigger is faster; a batch containing
+    // an unsupported rule is retried file-by-file, so it is not a correctness
+    // knob
+    convertBatchSize: s('sigma.convert_batch', 'SIGMA_CONVERT_BATCH', int, 200),
+    // Ceiling on any one git / pip / sigma / prisma invocation
+    commandTimeoutMs: s('sigma.command_timeout_ms', 'SIGMA_COMMAND_TIMEOUT_MS', int, 900000),
+
+    /*
+     * The SQLite file, as a Prisma datasource url.
+     *
+     * Resolved to an absolute path here on purpose. Prisma resolves a relative
+     * sqlite path against the SCHEMA directory while the app would resolve it
+     * against the working directory - two different files for one string, and
+     * the failure mode is a database that syncs fine and reads back empty
+     */
+    databaseUrl: s(
+      'sigma.database_url',
+      'SIGMA_DATABASE_URL',
+      str,
+      `file:${require('path').resolve(process.cwd(), 'data/sigma.db')}`
+    ),
+
+    // --- /sigma behaviour ---
+    // Results per Slack message. A message caps at 50 blocks and each result
+    // costs two, so much above 20 stops rendering
+    pageSize: s('sigma.page_size', 'SIGMA_PAGE_SIZE', int, 10),
+    // How long a paged result set stays clickable. It is a snapshot of a
+    // cluster that keeps moving, so this is deliberately short
+    sessionTtlMs: s('sigma.session_ttl_ms', 'SIGMA_SESSION_TTL_MS', int, 900000),
+    maxSessions: s('sigma.max_sessions', 'SIGMA_MAX_SESSIONS', int, 200),
+    // Cap on /sigma search results before paging
+    maxSearchResults: s('sigma.max_search_results', 'SIGMA_MAX_SEARCH_RESULTS', int, 200),
+    // Page size for the detection-rule _find sweep, and the circuit breaker on
+    // how far /sigma update will walk a large stack
+    stackPageSize: s('sigma.stack_page_size', 'SIGMA_STACK_PAGE_SIZE', int, 100),
+    maxStackRules: s('sigma.max_stack_rules', 'SIGMA_MAX_STACK_RULES', int, 5000),
+
+    /*
+     * Whether a rule added by /sigma search starts enabled.
+     *
+     * Defaults to false. A freshly converted rule has never run against this
+     * environment's data and its index patterns are whatever the pipeline
+     * guessed - enabling it sight unseen is how a channel gets a thousand
+     * alerts overnight
+     */
+    enableNewRules: s('sigma.enable_new_rules', 'SIGMA_ENABLE_NEW_RULES', bool, false),
   },
 };

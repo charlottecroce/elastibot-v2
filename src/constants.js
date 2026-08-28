@@ -17,6 +17,16 @@ const ACTIONS = Object.freeze({
   // /start's radio input toggling between "paste my own key" and "create one
   // for me" - swaps the modal's blocks via views.update
   START_METHOD_SELECT: 'start_method_select',
+
+  // /sigma - the space picker shown before anything is read or written
+  SIGMA_SPACE_SELECT: 'sigma_space_select',
+  // Back / Next on a paged result set. The value carries the target page
+  SIGMA_PAGE: 'sigma_page',
+  SIGMA_RULE_UPDATE: 'sigma_rule_update',
+  SIGMA_RULE_ADD: 'sigma_rule_add',
+  // A link button. It has a handler only so Bolt stops warning about an
+  // unhandled interaction on every click
+  SIGMA_RULE_VIEW: 'sigma_rule_view',
 });
 
 /** Slack view callback_ids (modals) */
@@ -30,6 +40,7 @@ const COMMANDS = Object.freeze({
   CASE: '/case',
   ADD_ALERT: '/add_alert',
   STATS: '/stats',
+  SIGMA: '/sigma',
 });
 
 /** Keys in data/state.json */

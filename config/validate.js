@@ -99,7 +99,7 @@ function validateConfig(config, { throwOnError = true } = {}) {
   if (config.elastic.tlsRejectUnauthorized === false) {
     warnings.push(
       'ELASTIC_TLS_REJECT_UNAUTHORIZED=false - TLS certificates are NOT verified. ' +
-        'Acceptable for an internal cluster with a self-signed cert, not otherwise'
+      'Acceptable for an internal cluster with a self-signed cert, not otherwise'
     );
   }
 
@@ -107,7 +107,7 @@ function validateConfig(config, { throwOnError = true } = {}) {
   if (!config.security.encryptionKey) {
     warnings.push(
       'ELASTIBOT_SECRET_KEY is not set - analyst API keys will be stored UNENCRYPTED. ' +
-        'Generate one with: openssl rand -hex 16'
+      'Generate one with: openssl rand -hex 16'
     );
   } else if (config.security.encryptionKey.length < 32) {
     warnings.push(
@@ -145,7 +145,7 @@ function validateConfig(config, { throwOnError = true } = {}) {
     ) {
       errors.push(
         'WATCH_JITTER_RATIO must be between 0 and 1 (exclusive), got ' +
-          JSON.stringify(config.watchers.jitterRatio)
+        JSON.stringify(config.watchers.jitterRatio)
       );
     }
 
@@ -153,7 +153,7 @@ function validateConfig(config, { throwOnError = true } = {}) {
     if (config.watchers.pollIntervalMs < 5000) {
       warnings.push(
         `WATCH_POLL_MS is ${config.watchers.pollIntervalMs} - polling Elastic more than once ` +
-          'every 5s adds load for no benefit; alerts are not that fresh'
+        'every 5s adds load for no benefit; alerts are not that fresh'
       );
     }
 
@@ -163,16 +163,16 @@ function validateConfig(config, { throwOnError = true } = {}) {
     if (worstCallMs >= config.watchers.pollIntervalMs) {
       warnings.push(
         `a single Elastic call can take up to ${worstCallMs}ms ` +
-          `(ELASTIC_RETRIES ${config.elastic.retries} x ELASTIC_TIMEOUT_MS ` +
-          `${config.elastic.requestTimeoutMs}), which is at or above WATCH_POLL_MS ` +
-          `${config.watchers.pollIntervalMs} - ticks will be skipped under load`
+        `(ELASTIC_RETRIES ${config.elastic.retries} x ELASTIC_TIMEOUT_MS ` +
+        `${config.elastic.requestTimeoutMs}), which is at or above WATCH_POLL_MS ` +
+        `${config.watchers.pollIntervalMs} - ticks will be skipped under load`
       );
     }
 
     if (!config.elastic.serviceApiKey) {
       warnings.push(
         'WATCHERS_ENABLED is true but ELASTIC_SERVICE_API_KEY is not set - ' +
-          'watchers will not run. Set the key, or WATCHERS_ENABLED=false'
+        'watchers will not run. Set the key, or WATCHERS_ENABLED=false'
       );
     }
 
@@ -189,7 +189,7 @@ function validateConfig(config, { throwOnError = true } = {}) {
     if (config.watchers.postDelayMs < 100) {
       warnings.push(
         `WATCH_POST_DELAY_MS is ${config.watchers.postDelayMs} - Slack will rate limit a burst. ` +
-          'Keep it at 300 or above'
+        'Keep it at 300 or above'
       );
     }
 
@@ -217,7 +217,42 @@ function validateConfig(config, { throwOnError = true } = {}) {
   if (!/^(\d+)(m|h|d|w)$/i.test(String(config.stats.defaultWindow || ''))) {
     errors.push(
       'STATS_DEFAULT_WINDOW must look like 24h, 7d or 2w - got ' +
-        JSON.stringify(config.stats.defaultWindow)
+      JSON.stringify(config.stats.defaultWindow)
+    );
+  }
+
+  // --- Sigma ---
+  if (config.sigma.pageSize < 1 || config.sigma.pageSize > 20) {
+    errors.push(
+      `SIGMA_PAGE_SIZE must be between 1 and 20, got ${JSON.stringify(config.sigma.pageSize)}`
+    );
+  }
+  positiveInt(config.sigma.maxStackRules, 'SIGMA_MAX_STACK_RULES');
+  positiveInt(config.sigma.stackPageSize, 'SIGMA_STACK_PAGE_SIZE');
+
+  if (!String(config.sigma.databaseUrl || '').startsWith('file:')) {
+    errors.push(
+      'SIGMA_DATABASE_URL must be a sqlite file: url, got ' +
+      JSON.stringify(config.sigma.databaseUrl)
+    );
+  } else if (!require('fs').existsSync(config.sigma.databaseUrl.slice('file:'.length))) {
+    /*
+     * Not fatal - a deployment that never uses /sigma never needs the database,
+     * and the command says so itself when asked.
+     *
+     * Checked with fs rather than by calling src/sigma/db.isReady(), which
+     * would make config/ require a module that requires config/
+     */
+    warnings.push(
+      'the Sigma database does not exist yet - /sigma will tell analysts to ask an admin. ' +
+      'Run `npm run sigma:setup` then `npm run update-sigmaDB`'
+    );
+  }
+
+  if (config.sigma.enableNewRules) {
+    warnings.push(
+      'sigma.enable_new_rules is on - rules added by /sigma search will start enabled ' +
+      'and begin alerting against index patterns nobody has reviewed'
     );
   }
 
@@ -227,7 +262,7 @@ function validateConfig(config, { throwOnError = true } = {}) {
     log.fatal('configuration is invalid', { problems: errors.length });
     throw new ConfigError(
       `Configuration is invalid:\n  - ${errors.join('\n  - ')}\n\n` +
-        'Copy elastibot.yml.example to elastibot.yml and fill it in.'
+      'Copy elastibot.yml.example to elastibot.yml and fill it in.'
     );
   }
 

@@ -129,7 +129,7 @@ function pendingBlocks(rec, pendingIds, pendingRuleCounts) {
       text: {
         type: 'mrkdwn',
         text:
-          `:new: *${pendingCount} new alert${pendingCount === 1 ? '' : 's'} ` +
+          `*${pendingCount} new alert${pendingCount === 1 ? '' : 's'} ` +
           `since the case was created*${breakdown}`,
       },
     },

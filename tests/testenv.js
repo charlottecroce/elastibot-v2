@@ -174,6 +174,18 @@ const unitEnv = () => ({
   INCIDENT_IDLE_MS: '28800000',
   INCIDENT_MAX_LIFETIME_MS: '86400000',
   INCIDENT_CLAIM_TTL_MS: '60000',
+
+  // /sigma. The database itself is mocked in the unit suite - these only pin
+  // the numbers the paging assertions are written against
+  SIGMA_PAGE_SIZE: '10',
+  SIGMA_SESSION_TTL_MS: '900000',
+  SIGMA_MAX_SEARCH_RESULTS: '200',
+  SIGMA_MAX_STACK_RULES: '5000',
+  SIGMA_STACK_PAGE_SIZE: '100',
+  SIGMA_ENABLE_NEW_RULES: 'false',
+  // Points at a path that will not exist, so db.isReady() is false unless a
+  // test says otherwise. Nothing in the unit suite opens it
+  SIGMA_DATABASE_URL: 'file:/nonexistent/elastibot-test-sigma.db',
 });
 
 /** Integration suite - `npm run test:live`. Talks to a real cluster */

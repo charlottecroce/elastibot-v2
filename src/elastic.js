@@ -277,6 +277,59 @@ function buildElasticClient(apiKey) {
       });
       return data?.cases || [];
     },
+
+    /** Kibana spaces this API key can see */
+    async getSpaces() {
+      const { data } = await kib.get('/api/spaces/space');
+      return (data || []).map((space) => ({ id: space.id, name: space.name || space.id }));
+    },
+
+    /** One page of detection rules in a space */
+    async findDetectionRules(spaceId, { page = 1, perPage = 100 } = {}) {
+      const { data } = await kib.get(`${spacePath(spaceId)}/api/detection_engine/rules/_find`, {
+        params: { page, per_page: perPage, sort_field: 'name', sort_order: 'asc' },
+      });
+      return {
+        page: data?.page,
+        perPage: data?.perPage,
+        total: data?.total ?? 0,
+        data: data?.data || [],
+      };
+    },
+
+    /**
+     * One rule by its `rule_id` - the Sigma UUID - rather than its `id`, which
+     * Kibana generates per install. Null when this space doesn't have it
+     */
+    async getDetectionRuleByRuleId(spaceId, ruleId) {
+      try {
+        const { data } = await kib.get(`${spacePath(spaceId)}/api/detection_engine/rules`, {
+          params: { rule_id: ruleId },
+        });
+        return data || null;
+      } catch (err) {
+        if (err?.response?.status === 404) return null;
+        throw err;
+      }
+    },
+
+    /**
+     * Merge fields into an existing rule.
+     *
+     * PATCH, not PUT, and that is the whole reason index patterns, exceptions,
+     * highlighted fields and scheduling survive a sigma update: a field that
+     * isn't in the body is left alone rather than cleared
+     */
+    async patchDetectionRule(spaceId, patch) {
+      const { data } = await kib.patch(`${spacePath(spaceId)}/api/detection_engine/rules`, patch);
+      return data;
+    },
+
+    /** Create a detection rule from a converted Sigma rule */
+    async createDetectionRule(spaceId, rule) {
+      const { data } = await kib.post(`${spacePath(spaceId)}/api/detection_engine/rules`, rule);
+      return data;
+    },
   };
 }
 

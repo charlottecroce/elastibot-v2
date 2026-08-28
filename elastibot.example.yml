@@ -231,3 +231,68 @@ cache:
 # --- Shutdown --------------------------------------------------------------
 # How long shutdown gets to drain watchers and flush stores before a hard exit
 shutdown_timeout_ms: 15000     # SHUTDOWN_TIMEOUT_MS
+
+# --- Sigma -----------------------------------------------------------------
+# The rule database `npm run update-sigmaDB` builds, and the /sigma command
+# that reads it. Delete this whole block if you don't use the feature - every
+# setting in it has a working default.
+#
+# Building the database needs git, python3 with venv, and network access to
+# GitHub and PyPI. The bot itself needs none of those; it only reads the
+# sqlite file the sync produced.
+sigma:
+  repo_url: https://github.com/SigmaHQ/sigma.git   # SIGMA_REPO_URL
+  repo_ref: master                                 # SIGMA_REPO_REF
+  repo_path: ./data/sigma-repo                     # SIGMA_REPO_PATH. shallow clone
+
+  # Which subdirectories of the repo to convert. The emerging-threats and
+  # threat-hunting sets are considerably noisier than the core rules; drop
+  # them here rather than filtering later
+  rule_dirs:                                       # SIGMA_RULE_DIRS
+    - rules
+    - rules-emerging-threats
+    - rules-threat-hunting
+
+  # sigma-cli is installed into its own virtualenv on first sync
+  venv_path: ./data/sigvenv                        # SIGMA_VENV_PATH
+  python: python3                                  # SIGMA_PYTHON
+
+  # These have to match the data your rules will run against. ecs_windows
+  # rules compared against Linux logs will report drift on `query` forever.
+  #
+  # `backend` is a conversion TARGET and `plugin` is the package that provides
+  # it - not the same thing, and only sometimes the same word. The lucene, eql
+  # and esql targets all come from the elasticsearch plugin. `sigma plugin
+  # list` in the virtualenv shows the identifiers
+  backend: lucene                                  # SIGMA_BACKEND
+  plugin: elasticsearch                            # SIGMA_PLUGIN
+  pipeline: ecs_windows                            # SIGMA_PIPELINE
+  format: siem_rule_ndjson                         # SIGMA_FORMAT
+
+  # Rules per `sigma convert` process. A batch containing a rule the backend
+  # can't express is retried one file at a time, so this is a speed knob only
+  convert_batch: 200                               # SIGMA_CONVERT_BATCH
+  command_timeout_ms: 900000                       # SIGMA_COMMAND_TIMEOUT_MS
+
+  # The sqlite file. Make it ABSOLUTE if you set it - the Prisma CLI resolves
+  # a relative path against prisma/, and the app against the working
+  # directory, which is two different files. Unset means <cwd>/data/sigma.db
+  # database_url: file:/opt/elastibot/data/sigma.db   # SIGMA_DATABASE_URL
+
+  # Results per Slack message. A message caps at 50 blocks and each result
+  # costs two, so above about 20 it simply stops rendering
+  page_size: 10                                    # SIGMA_PAGE_SIZE
+  # How long the Back/Next buttons on a result set keep working
+  session_ttl_ms: 900000                           # SIGMA_SESSION_TTL_MS
+  max_sessions: 200                                # SIGMA_MAX_SESSIONS
+  max_search_results: 200                          # SIGMA_MAX_SEARCH_RESULTS
+
+  # Page size for the detection-rule sweep /sigma update does, and the
+  # circuit breaker on how far it will walk a large stack
+  stack_page_size: 100                             # SIGMA_STACK_PAGE_SIZE
+  max_stack_rules: 5000                            # SIGMA_MAX_STACK_RULES
+
+  # Whether a rule added by /sigma search starts enabled. Leave this off. A
+  # freshly converted rule has never run against your data and its index
+  # patterns are whatever the pipeline guessed
+  enable_new_rules: false                          # SIGMA_ENABLE_NEW_RULES

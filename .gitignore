@@ -32,3 +32,8 @@ Thumbs.db
 
 # Python venv
 .venv/
+
+# Sigma
+data/sigma-repo/
+data/sigvenv/
+data/sigma.db*
