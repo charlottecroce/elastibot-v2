@@ -19,10 +19,7 @@
       }
     ],
     "no-console": "error",
-    "eqeqeq": [
-      "error",
-      "smart"
-    ],
+    "eqeqeq": ["error", "smart"],
     "no-var": "error",
     "prefer-const": "error",
     "no-return-await": "error",
@@ -30,11 +27,67 @@
   },
   "overrides": [
     {
-      "files": [
-        "tests/**/*.js"
-      ],
+      "files": ["tests/**/*.js"],
       "rules": {
         "no-console": "off"
+      }
+    },
+
+    {
+      "//": "Core may not reach into a feature. Core is what features are built ON; a core file that knows a feature's name has inverted the dependency, and the first symptom is that deleting the feature breaks the bootstrap. The one legal exception is src/features/index.js and src/features/config.js, which are the loaders and live under features/ precisely so this rule can name them.",
+      "files": ["src/core/**/*.js", "config/**/*.js", "app.js"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/features/*/**", "../features/*/*", "./features/*/*"],
+                "message": "Core must not import from inside a feature. Go through the loader (src/features), or promote the thing you want to src/core - once there is a second consumer for it."
+              }
+            ]
+          }
+        ]
+      }
+    },
+
+    {
+      "//": "A feature may not reach into another feature. If two need the same thing, it is promoted to core. util/pager came out of sigma exactly this way, when a second consumer appeared for it. The pattern matches any sibling; the feature's own files are relative paths that never contain 'features/', so they are unaffected.",
+      "files": ["src/features/*/**/*.js"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/features/*", "**/features/*/**", "../../features/*", "../*/", "../*/**"],
+                "message": "A feature must not import another feature. Promote the shared thing to src/core - but only once there is a genuine second consumer, not in anticipation of one."
+              }
+            ]
+          }
+        ]
+      }
+    },
+
+    {
+      "//": "The config load path. config/index.js builds its export at require time, so anything reachable from a feature's config.js during that build must not require config/ back. The cycle does not throw - it silently hands out a half-built object, and because tests/setup.js depends on that export the symptom lands somewhere unrelated. The `s` accessor is passed in as an argument for this reason.",
+      "files": ["src/features/*/config.js"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/config", "**/config/*", "../../../config", "../../../config/*"],
+                "message": "A feature's config.js must not require config/ - that is a load-order cycle. Use the `s` accessor you were passed; it IS the config accessor."
+              },
+              {
+                "group": ["**/core/**", "../../core/*", "../../core/**"],
+                "message": "A feature's config.js must not require core either: most of core requires config, so this is the same cycle one hop further out. Node builtins are fine."
+              }
+            ]
+          }
+        ]
       }
     }
   ]
