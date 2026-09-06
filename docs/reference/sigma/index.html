@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>Sigma - elastibot-v2</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Sigma";
+        var mkdocs_page_input_path = "reference/sigma.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> elastibot-v2
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">Table of Contents</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Getting Started</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../getting-started/install/">Installation</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../getting-started/api-keys/">Elastic API Keys</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Using Elastibot</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../using/commands/">Slash Commands</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../using/incident-messages/">Incident Messages</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">How It Works</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/architecture/">Architecture</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/watchers/">The Watchers</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/grouping/">Alert Grouping</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/incidents/">Incidents</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/cases/">Cases</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/storage/">Storage</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Reference</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../configuration/">Configuration</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../logging/">Logging and Errors</a>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../../developer-guide/">Developer Guide</a>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">elastibot-v2</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+      <li class="breadcrumb-item active">Sigma</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/charlottecroce/elastibot-v2/edit/main/docs_src/reference/sigma.md">Edit on elastibot-v2</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="sigma">Sigma<a class="headerlink" href="#sigma" title="Permanent link">&para;</a></h1>
+<p>Two halves that never run at the same time.</p>
+<p><strong><code>npm run update-sigmaDB</code></strong> builds a local database of every Sigma rule, already converted to the Elasticsearch detection-rule format. It clones a repo, builds a Python virtualenv and runs for minutes.</p>
+<p><strong><code>/sigma</code></strong> reads that database and reconciles it against a Kibana space. It never converts anything and never touches the network beyond Elastic.</p>
+<h2 id="building-the-database">Building the database<a class="headerlink" href="#building-the-database" title="Permanent link">&para;</a></h2>
+<p>Once, per host:</p>
+<pre class="codehilite"><code class="language-bash">npm run sigma:setup      # prisma generate + create the sqlite file
+</code></pre>
+
+<p>Then whenever you want the rules refreshed:</p>
+<pre class="codehilite"><code class="language-bash">npm run update-sigmaDB
+</code></pre>
+
+<p>What it does, in order:</p>
+<ol>
+<li>Shallow-clones <code>SIGMA_REPO_URL</code> to <code>data/sigma-repo</code>, or fast-forwards it if it's already there.</li>
+<li>Creates <code>data/sigvenv</code> and installs <code>sigma-cli</code> plus the backend plugin, unless it exists.</li>
+<li>Reads every <code>.yml</code> under <code>SIGMA_RULE_DIRS</code> and indexes them by Sigma id.</li>
+<li>Converts them with <code>sigma convert -t lucene -p ecs_windows -f siem_rule_ndjson</code>, in batches.</li>
+<li>Inserts one row per rule into <code>data/sigma.db</code>, and deletes rows for rules that are no longer upstream.</li>
+</ol>
+<p>Requires <code>git</code>, <code>python3</code> with <code>venv</code>, and network access to GitHub and PyPI.</p>
+<h2 id="sigma-update"><code>/sigma update</code><a class="headerlink" href="#sigma-update" title="Permanent link">&para;</a></h2>
+<p>Compares every detection rule in one space against the database and lists the ones that have drifted, ten to a page, each with an <strong>Update rule</strong> button.</p>
+<p>A rule is skipped when:</p>
+<ul>
+<li>it has no <code>rule_id</code> field. NOT <code>id</code>: every rule has one of those. Only Sigma-derived rules carry a <code>rule_id</code> we can match on.</li>
+<li>its <code>rule_id</code> isn't in the database. That's what keeps Elastic's prebuilt rules and anything hand-written out of the way, without needing to recognise them individually.</li>
+<li>it's Elastic-managed (<code>immutable</code>). Those are listed so you know they're there, but Kibana won't patch them.</li>
+</ul>
+<h3 id="what-an-update-changes">What an update changes<a class="headerlink" href="#what-an-update-changes" title="Permanent link">&para;</a></h3>
+<p>Taken from Sigma:</p>
+<p><code>name</code>, <code>description</code>, <code>query</code>, <code>language</code>, <code>severity</code>, <code>risk_score</code>, <code>references</code>, <code>false_positives</code>, <code>threat</code>, <code>author</code>, <code>license</code>, <code>note</code></p>
+<p>Left exactly as it was:</p>
+<p>index patterns, data views, exceptions, custom highlighted fields (<code>investigation_fields</code>), the schedule (<code>interval</code>, <code>from</code>, <code>to</code>), <code>max_signals</code>, enabled state, actions, throttling, filters and timelines.</p>
+<p>Tags are <strong>merged</strong>.</p>
+<h2 id="sigma-search-keyword"><code>/sigma search &lt;keyword&gt;</code><a class="headerlink" href="#sigma-search-keyword" title="Permanent link">&para;</a></h2>
+<p>Keyword match over rule titles and descriptions in the database, paged the same way. Each result gets one of:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Add rule</strong></td>
+<td>the space doesn't have it</td>
+</tr>
+<tr>
+<td><strong>Update rule</strong></td>
+<td>it's there and has drifted</td>
+</tr>
+<tr>
+<td><strong>View rule</strong></td>
+<td>it's there and is up to date</td>
+</tr>
+</tbody>
+</table>
+<p>Added rules are created <strong>disabled</strong> by default (<code>SIGMA_ENABLE_NEW_RULES</code>). A freshly converted rule has never run against your data and its index patterns are whatever the pipeline guessed.</p>
+<h2 id="choosing-a-space">Choosing a space<a class="headerlink" href="#choosing-a-space" title="Permanent link">&para;</a></h2>
+<p>Neither subcommand does anything until it knows which space it's working in. Pass <code>space:&lt;id&gt;</code> and it goes straight there; leave it off and the first reply is a row of buttons, one per space your API key can see.</p>
+<p>There's no default. Both paths write detection rules, and writing them into whichever space happened to be configured is a bad idea.</p>
+<h2 id="paging">Paging<a class="headerlink" href="#paging" title="Permanent link">&para;</a></h2>
+<p>Results are held in memory for <code>SIGMA_SESSION_TTL_MS</code> (15 minutes) and the Back/Next buttons carry a token into that cache. A restart drops every open pager.</p>
+<p>Recomputing on each click was the alternative, and for <code>/sigma update</code> that means re-sweeping every rule in the space per page turn.</p>
+<h2 id="settings">Settings<a class="headerlink" href="#settings" title="Permanent link">&para;</a></h2>
+<p>The whole <code>sigma:</code> block in <code>elastibot.yml</code> is optional; delete it and every default below applies. As everywhere else, the file wins over the environment variable.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Env</th>
+<th>Default</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sigma.repo_url</code></td>
+<td><code>SIGMA_REPO_URL</code></td>
+<td>SigmaHQ/sigma</td>
+<td></td>
+</tr>
+<tr>
+<td><code>sigma.repo_ref</code></td>
+<td><code>SIGMA_REPO_REF</code></td>
+<td><code>master</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>sigma.repo_path</code></td>
+<td><code>SIGMA_REPO_PATH</code></td>
+<td><code>./data/sigma-repo</code></td>
+<td>shallow clone</td>
+</tr>
+<tr>
+<td><code>sigma.rule_dirs</code></td>
+<td><code>SIGMA_RULE_DIRS</code></td>
+<td><code>rules</code>, <code>rules-emerging-threats</code>, <code>rules-threat-hunting</code></td>
+<td>drop the last two if they're noise</td>
+</tr>
+<tr>
+<td><code>sigma.venv_path</code></td>
+<td><code>SIGMA_VENV_PATH</code></td>
+<td><code>./data/sigvenv</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>sigma.python</code></td>
+<td><code>SIGMA_PYTHON</code></td>
+<td><code>python3</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>sigma.backend</code></td>
+<td><code>SIGMA_BACKEND</code></td>
+<td><code>lucene</code></td>
+<td>must match your data</td>
+</tr>
+<tr>
+<td><code>sigma.pipeline</code></td>
+<td><code>SIGMA_PIPELINE</code></td>
+<td><code>ecs_windows</code></td>
+<td>must match your data</td>
+</tr>
+<tr>
+<td><code>sigma.format</code></td>
+<td><code>SIGMA_FORMAT</code></td>
+<td><code>siem_rule_ndjson</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>sigma.convert_batch</code></td>
+<td><code>SIGMA_CONVERT_BATCH</code></td>
+<td><code>200</code></td>
+<td>speed only — a bad batch is retried per file</td>
+</tr>
+<tr>
+<td><code>sigma.command_timeout_ms</code></td>
+<td><code>SIGMA_COMMAND_TIMEOUT_MS</code></td>
+<td><code>900000</code></td>
+<td>any one git/pip/sigma/prisma call</td>
+</tr>
+<tr>
+<td><code>sigma.database_url</code></td>
+<td><code>SIGMA_DATABASE_URL</code></td>
+<td><code>file:&lt;cwd&gt;/data/sigma.db</code></td>
+<td>make it absolute if you set it</td>
+</tr>
+<tr>
+<td><code>sigma.page_size</code></td>
+<td><code>SIGMA_PAGE_SIZE</code></td>
+<td><code>10</code></td>
+<td>above ~20 a message stops rendering</td>
+</tr>
+<tr>
+<td><code>sigma.session_ttl_ms</code></td>
+<td><code>SIGMA_SESSION_TTL_MS</code></td>
+<td><code>900000</code></td>
+<td>how long Back/Next keep working</td>
+</tr>
+<tr>
+<td><code>sigma.max_sessions</code></td>
+<td><code>SIGMA_MAX_SESSIONS</code></td>
+<td><code>200</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>sigma.max_search_results</code></td>
+<td><code>SIGMA_MAX_SEARCH_RESULTS</code></td>
+<td><code>200</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>sigma.stack_page_size</code></td>
+<td><code>SIGMA_STACK_PAGE_SIZE</code></td>
+<td><code>100</code></td>
+<td><code>_find</code> page size</td>
+</tr>
+<tr>
+<td><code>sigma.max_stack_rules</code></td>
+<td><code>SIGMA_MAX_STACK_RULES</code></td>
+<td><code>5000</code></td>
+<td>circuit breaker on the <code>/sigma update</code> sweep</td>
+</tr>
+<tr>
+<td><code>sigma.enable_new_rules</code></td>
+<td><code>SIGMA_ENABLE_NEW_RULES</code></td>
+<td><code>false</code></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<p><strong>"The Sigma database is not set up yet"</strong>: <code>npm run sigma:setup</code>, then <code>npm run update-sigmaDB</code>.</p>
+<p><strong>Everything reports as drifted</strong>: the backend or pipeline doesn't match the data the rules were written against. Check <code>SIGMA_PIPELINE</code>; <code>ecs_windows</code> rules compared against Linux logs will differ on <code>query</code> forever.</p>
+<p><strong>Lots of conversion failures</strong>: usually a missing backend plugin. Delete <code>data/sigvenv</code> and re-run to rebuild it.</p>
+              
+            </div>
+          </div><footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/charlottecroce/elastibot-v2" class="fa fa-code-fork" style="color: #fcfcfc"> elastibot-v2</a>
+        </span>
+    
+    
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+      <script src="../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

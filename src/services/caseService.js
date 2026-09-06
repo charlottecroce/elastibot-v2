@@ -3,14 +3,21 @@
 const config = require('../../config');
 const { createElasticClient } = require('../elastic');
 const { buildCaseTitle, monthYearTag } = require('../naming');
-const { caseUrl } = require('./format');
+const { caseUrl } = require('./kibanaLinks');
 const { getSpaceName } = require('./spaceService');
+const { attachInRuleBatches } = require('./attachAlerts');
 const { ALERT_STATUS_FOR_CASE, DEFAULT_SPACE, UNKNOWN_RULE } = require('../constants');
 const { UserFacingError, describeAxiosError } = require('../util/errors');
 const { logger } = require('../util/logger');
 
 /*
  * Case creation and alert attachment. Error types come from util/errors
+ *
+ * The per-rule attach loop (group alerts by rule, POST one comment per rule,
+ * collect failures into a readable warning) lives in services/attachAlerts.js
+ * now, not here. It used to be copy-pasted between createCaseFromAlerts and
+ * attachAlertsToCase and the two copies had already drifted - see that file's
+ * header for the details
  */
 
 const log = logger.child({ scope: 'service:case' });
@@ -38,6 +45,34 @@ function dedupeById(list) {
 /** Key with the highest count in a { key: count } map */
 function topKey(counts) {
   return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0];
+}
+
+/** An error status that means "this one id isn't there"*/
+const MISSING_STATUSES = new Set([400, 404]);
+
+/**
+ * Resolve alert ids to alerts, tolerating individual misses but not a systemic failure.
+ *
+ * @param {object} client
+ * @param {string[]} alertIds
+ * @returns {Promise<object[]>} deduped alerts, in the order the ids came in
+ */
+async function fetchAlertsByIds(client, alertIds) {
+  const settled = await Promise.all(
+    alertIds.map((id) =>
+      client
+        .getAlertById(id)
+        .then((alert) => ({ alert }))
+        .catch((err) => ({ err }))
+    )
+  );
+
+  const fatal = settled.find(
+    ({ err }) => err && !MISSING_STATUSES.has(err.response?.status)
+  );
+  if (fatal) throw describeAxiosError(fatal.err, 'Looking up alerts');
+
+  return dedupeById(settled.map(({ alert }) => alert).filter(Boolean));
 }
 
 /**
@@ -107,52 +142,31 @@ async function createCaseFromAlerts(client, alerts) {
   }
   const caseId = created.id;
 
-  // Attach alerts in per-rule batches
-  const byRule = new Map();
-  for (const a of alerts) {
-    const key = a.ruleId || a.ruleName || 'unknown';
-    if (!byRule.has(key)) byRule.set(key, []);
-    byRule.get(key).push(a);
-  }
+  // Attach alerts in per-rule batches. `owner` is forced across every batch -
+  // case creation picks one owner for the whole case, unlike attaching to an
+  // existing case where each alert keeps its own
+  const { attachedIds, warning } = await attachInRuleBatches(client, {
+    spaceId,
+    caseId,
+    alerts,
+    owner,
+  });
 
-  let attached = 0;
-  // Which ids actually made it onto the case, not just how many. The incident
-  // store needs the exact ids (recordCase / recordAttached), not a count - a
-  // count alone can't tell "pending" apart from "attached"
-  const attachedIds = [];
-  const failures = [];
-  for (const list of byRule.values()) {
-    try {
-      await client.attachAlert(spaceId, caseId, {
-        type: 'alert',
-        alertId: list.map((a) => a.id),
-        index: list.map((a) => a.index),
-        rule: { id: list[0].ruleId, name: list[0].ruleName },
-        owner,
-      });
-      attached += list.length;
-      attachedIds.push(...list.map((a) => a.id));
-    } catch (err) {
-      failures.push(
-        `${list[0].ruleName} ×${list.length} (${describeAxiosError(err, 'attach').message})`
-      );
-    }
-  }
-
-  if (attached === 0) {
+  if (attachedIds.length === 0) {
+    const reason = warning ? warning.replace(/^Some alerts didn't attach: /, '') : 'unknown error';
     throw new UserFacingError(
-      `Case *${title}* (\`${caseId}\`) was created, but attaching alerts failed: ${failures.join('; ')}`
+      `Case *${title}* (\`${caseId}\`) was created, but attaching alerts failed: ${reason}`
     );
   }
 
   // Partial failures are reported to the analyst in the Slack message, and
   // logged here so there's a record after that message scrolls away
-  if (failures.length) {
+  if (warning) {
     log.warn('some alerts did not attach', {
       caseId,
       spaceId,
-      attached,
-      failed: alerts.length - attached,
+      attached: attachedIds.length,
+      failed: alerts.length - attachedIds.length,
     });
   }
 
@@ -161,13 +175,15 @@ async function createCaseFromAlerts(client, alerts) {
     title,
     spaceId,
     spaceName,
+    // `owner` is what incidents.recordCase stores as rec.caseOwner, so a
+    // "View case" link can be rebuilt from the record alone later
     owner,
     ruleName: representativeRule,
     ruleCounts,
     alertCount: alerts.length,
-    attachedCount: attached,
+    attachedCount: attachedIds.length,
     attachedIds,
-    warning: failures.length ? `Some alerts didn't attach: ${failures.join('; ')}` : null,
+    warning,
     link: caseUrl(spaceId, caseId, owner),
   };
 }
@@ -199,59 +215,12 @@ async function createCaseForAlert(apiKey, alertId) {
 }
 
 /**
- * The grouped "Create case" button, driven by a query rather than a known id
- * list. Re-runs the user+host+time-range query so the case captures the whole
- * burst (and any stragglers) at click time.
- *
- * NOTE: the incident-based flow (src/commands/case.js) uses createCaseForIds
- * instead, since an open incident record already carries the authoritative
- * alert id list - it does not need (and must not get) a fresh query that could
- * disagree with what the Slack message is showing. This function remains for
- * any caller that only has a user+host+time descriptor, not a concrete id list.
- */
-async function createCaseForGroup(apiKey, { spaceId, userName, hostName, from, to }) {
-  const client = createElasticClient(apiKey);
-
-  let alerts;
-  try {
-    alerts = await client.getRelatedAlerts({
-      spaceId,
-      userName,
-      hostName,
-      from,
-      to,
-      size: config.grouping.maxAlertsPerCase,
-    });
-  } catch (err) {
-    throw describeAxiosError(err, 'Looking up alerts');
-  }
-  alerts = dedupeById(alerts || []);
-  if (!alerts.length) {
-    throw new UserFacingError(
-      'No alerts found for this group — they may have aged out of the index.'
-    );
-  }
-
-  // Hitting the cap means the case holds only part of the incident
-  if (alerts.length >= config.grouping.maxAlertsPerCase) {
-    log.warn('group hit the alert cap - the case may not contain the whole incident', {
-      spaceId,
-      userName,
-      hostName,
-      cap: config.grouping.maxAlertsPerCase,
-    });
-  }
-
-  return createCaseFromAlerts(client, alerts);
-}
-
-/**
  * Create one case from an explicit list of alert ids already known to the
- * caller - an open incident's rec.alertIds. Unlike createCaseForGroup, this
- * does NOT re-run the user+host+time query: the incident record is already
- * the authoritative list of what the Slack message shows, and a fresh query
- * could disagree with it (an alert that aged out of the window, a stale
- * cursor, etc). Backs the green "Create case" button on a posted incident.
+ * caller - an open incident's rec.alertIds. Deliberately does NOT re-run a
+ * user+host+time query: the incident record is already the authoritative list
+ * of what the Slack message shows, and a fresh query could disagree with it (an
+ * alert that aged out of the window, a stale cursor, etc). Backs the green
+ * "Create case" button on a posted incident.
  *
  * @param {string} apiKey
  * @param {string[]} alertIds
@@ -265,16 +234,7 @@ async function createCaseForGroup(apiKey, { spaceId, userName, hostName, from, t
 async function createCaseForIds(apiKey, alertIds, { spaceId } = {}) {
   const client = createElasticClient(apiKey);
 
-  let fetched;
-  try {
-    fetched = await Promise.all(
-      alertIds.map((id) => client.getAlertById(id).catch(() => null))
-    );
-  } catch (err) {
-    throw describeAxiosError(err, 'Looking up alerts');
-  }
-
-  let alerts = dedupeById(fetched.filter(Boolean));
+  let alerts = await fetchAlertsByIds(client, alertIds);
   if (spaceId) alerts = alerts.filter((a) => a.spaceId === spaceId);
 
   if (!alerts.length) {
@@ -292,6 +252,11 @@ async function createCaseForIds(apiKey, alertIds, { spaceId } = {}) {
  * case" button on a posted incident - the case already exists by this point,
  * so there is no title/owner logic here, only the attach step
  *
+ * Unlike createCaseFromAlerts, no owner override is passed to
+ * attachInRuleBatches: the case's owner was already fixed at creation time, so
+ * each batch just takes its own alert's owner (falling back to the configured
+ * default), same as before this was pulled into the shared helper
+ *
  * @param {string} apiKey
  * @param {object} opts
  * @param {string} opts.spaceId
@@ -302,16 +267,7 @@ async function createCaseForIds(apiKey, alertIds, { spaceId } = {}) {
 async function attachAlertsToCase(apiKey, { spaceId, caseId, alertIds }) {
   const client = createElasticClient(apiKey);
 
-  let fetched;
-  try {
-    fetched = await Promise.all(
-      alertIds.map((id) => client.getAlertById(id).catch(() => null))
-    );
-  } catch (err) {
-    throw describeAxiosError(err, 'Looking up alerts');
-  }
-
-  const alerts = dedupeById(fetched.filter(Boolean));
+  const alerts = await fetchAlertsByIds(client, alertIds);
   if (!alerts.length) {
     // Nothing to attach is not fatal - the caller (commands/case.js) still has
     // a valid case and should just report that nothing new landed
@@ -319,37 +275,13 @@ async function attachAlertsToCase(apiKey, { spaceId, caseId, alertIds }) {
       caseId,
       attachedIds: [],
       warning:
-        "None of the pending alerts could be found — they may have aged out of the index.",
+        'None of the pending alerts could be found — they may have aged out of the index.',
     };
   }
 
-  const byRule = new Map();
-  for (const a of alerts) {
-    const key = a.ruleId || a.ruleName || 'unknown';
-    if (!byRule.has(key)) byRule.set(key, []);
-    byRule.get(key).push(a);
-  }
+  const { attachedIds, warning } = await attachInRuleBatches(client, { spaceId, caseId, alerts });
 
-  const attachedIds = [];
-  const failures = [];
-  for (const list of byRule.values()) {
-    try {
-      await client.attachAlert(spaceId, caseId, {
-        type: 'alert',
-        alertId: list.map((a) => a.id),
-        index: list.map((a) => a.index),
-        rule: { id: list[0].ruleId, name: list[0].ruleName },
-        owner: list[0].owner || config.elastic.defaultOwner,
-      });
-      attachedIds.push(...list.map((a) => a.id));
-    } catch (err) {
-      failures.push(
-        `${list[0].ruleName} ×${list.length} (${describeAxiosError(err, 'attach').message})`
-      );
-    }
-  }
-
-  if (failures.length) {
+  if (warning) {
     log.warn('some alerts did not attach to an existing case', {
       caseId,
       spaceId,
@@ -358,11 +290,7 @@ async function attachAlertsToCase(apiKey, { spaceId, caseId, alertIds }) {
     });
   }
 
-  return {
-    caseId,
-    attachedIds,
-    warning: failures.length ? `Some alerts didn't attach: ${failures.join('; ')}` : null,
-  };
+  return { caseId, attachedIds, warning };
 }
 
 /**
@@ -371,6 +299,11 @@ async function attachAlertsToCase(apiKey, { spaceId, caseId, alertIds }) {
  * We read the case first for its status: Kibana only pushes status to alerts on a
  * case status *change*, so an alert joining an already in-progress/closed case
  * would otherwise stay open. We set it to match once, then syncing takes over
+ *
+ * This is a single-alert attach, not a batch, so it does NOT go through
+ * attachInRuleBatches (which always posts alertId/index as arrays). Its
+ * request body is the scalar shape Kibana's comments API also accepts for one
+ * alert, and callers/tests depend on that exact shape
  *
  * @returns {Promise<{caseId,alertId,ruleName,link}>}
  */
@@ -439,7 +372,6 @@ async function addAlertToCase(apiKey, caseId, alertId) {
 
 module.exports = {
   createCaseForAlert,
-  createCaseForGroup,
   createCaseForIds,
   attachAlertsToCase,
   addAlertToCase,

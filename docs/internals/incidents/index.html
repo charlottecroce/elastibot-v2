@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>Incidents - elastibot-v2</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Incidents";
+        var mkdocs_page_input_path = "internals/incidents.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> elastibot-v2
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">Table of Contents</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Getting Started</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../getting-started/install/">Installation</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../getting-started/api-keys/">Elastic API Keys</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Using Elastibot</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../using/commands/">Slash Commands</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../using/incident-messages/">Incident Messages</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">How It Works</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../architecture/">Architecture</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../watchers/">The Watchers</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../grouping/">Alert Grouping</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">Incidents</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#what-a-record-holds">What a record holds</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#matching-a-new-burst-to-an-open-incident">Matching a new burst to an open incident</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#claims">Claims</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#pending-alerts">Pending alerts</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#reaping">Reaping</a>
+    </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cases/">Cases</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../storage/">Storage</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Reference</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../reference/configuration/">Configuration</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../reference/logging/">Logging and Errors</a>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../../developer-guide/">Developer Guide</a>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">elastibot-v2</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">How It Works</li>
+      <li class="breadcrumb-item active">Incidents</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/charlottecroce/elastibot-v2/edit/main/docs_src/internals/incidents.md">Edit on elastibot-v2</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="incidents">Incidents<a class="headerlink" href="#incidents" title="Permanent link">&para;</a></h1>
+<p><a href="../grouping/">Grouping</a> only sees one poll's worth of alerts. With a 1-minute poll tick, two related alerts ten minutes apart would land in two different batches and get two different messages, which creates the spammy channel the grouping was supposed to fix.</p>
+<p>The incident store is the persistence layer that fixes that. It remembers what was posted, so a later tick can merge into an existing message instead of posting a new one, and so two analysts can't open two cases for the same burst.</p>
+<p>It lives in <code>src/incidents.js</code>, persists to <code>data/incidents.json</code>, and is shared between the watchers and the button handlers via the <a href="../architecture/#the-application-context">application context</a>.</p>
+<h2 id="what-a-record-holds">What a record holds<a class="headerlink" href="#what-a-record-holds" title="Permanent link">&para;</a></h2>
+<pre class="codehilite"><code class="language-js">{
+  key,                    // random UUID. carried on every button
+  spaceId, hostName, spaceName,
+  userNames, primaryUser,
+
+  channel, messageTs,     // where the message is, so it can be updated
+
+  alertIds,               // everything shown on the message
+  attachedIds,            // the subset that made it onto the case
+  alertRules,             // id &gt; rule name, for every alert
+
+  caseId, caseTitle, caseLink, caseOwner,
+  claim,                  // { by, at } while someone is mid-click
+
+  ruleCounts,             // derived from alertRules
+  representativeRule,
+  topSeverity,
+  from, to,
+
+  createdAt, lastActivityAt,
+}
+</code></pre>
+
+<p><code>alertRules</code> is the single source of truth for <code>ruleCounts</code> and <code>representativeRule</code>. Both are recomputed from it on every change rather than maintained separately, so the two can't disagree.</p>
+<p>Keys are generated, not derived from anything. They're plain UUIDs, which keeps them safe to put in a Slack button <code>value</code>.</p>
+<h2 id="matching-a-new-burst-to-an-open-incident">Matching a new burst to an open incident<a class="headerlink" href="#matching-a-new-burst-to-an-open-incident" title="Permanent link">&para;</a></h2>
+<p><code>findMatch(group)</code> is deliberately narrow. Same space and host is necessary but not sufficient. Two analysts' sessions on one jump box are two incidents.</p>
+<p>A record matches when all of:</p>
+<ul>
+<li>same <code>spaceId</code> and same <code>hostName</code> (no host at all → no match, ever)</li>
+<li>it has a <code>messageTs</code> (a failed or in-flight post is inert)</li>
+<li>it hasn't expired</li>
+<li>and <strong>either</strong> the incoming identities overlap the record's, <strong>or</strong> the whole incoming burst is <code>machineOnly</code> and so carries no information that would contradict the match</li>
+</ul>
+<p>If somehow there are two candidates, the most recently active wins.</p>
+<p><code>findByAlertId(id)</code> is the other lookup, used by <code>/case</code> and <code>/add_alert</code> so a case made from the command line still updates the block kit.</p>
+<h2 id="claims">Claims<a class="headerlink" href="#claims" title="Permanent link">&para;</a></h2>
+<p><code>tryClaim</code> is the thing that makes a duplicate case impossible.</p>
+<pre class="codehilite"><code class="language-js">tryClaim(key, slackUserId, { allowExistingCase })
+  → { ok: true, rec }
+  → { ok: false, reason: 'case_exists' | 'claimed' | 'gone', rec }
+</code></pre>
+
+<p>It's synchronous and runs <strong>before</strong> any network call, so the second click loses instantly. The refusal reasons map to different messages:</p>
+<table>
+<thead>
+<tr>
+<th>reason</th>
+<th>meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>case_exists</code></td>
+<td>there's already a case — use it instead of making another</td>
+</tr>
+<tr>
+<td><code>claimed</code></td>
+<td>another analyst is mid-click, wait a second</td>
+</tr>
+<tr>
+<td><code>gone</code></td>
+<td>the incident was reaped out from under the message</td>
+</tr>
+</tbody>
+</table>
+<p><code>allowExistingCase</code> is for the add-alerts path, which needs the mutual exclusion (Kibana's attach isn't idempotent, two clicks would double-attach) but for which an existing case is the precondition rather than a refusal.</p>
+<p>A claim is honoured for <code>INCIDENT_CLAIM_TTL_MS</code> (60s) and then treated as abandoned. Claims are also cleared wholesale at boot, since nothing can be mid-creation when the process has just started.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>This is a single-process lock. It's correct within one Elastibot instance and
+<strong>not</strong> correct across two pointed at the same workspace. Running more than
+one means moving the claim to something with a real compare-and-set - Redis
+<code>SETNX</code>, or an ES document updated with <code>if_seq_no</code>.</p>
+</div>
+<h2 id="pending-alerts">Pending alerts<a class="headerlink" href="#pending-alerts" title="Permanent link">&para;</a></h2>
+<p><code>pending(rec)</code> is <code>alertIds</code> minus <code>attachedIds</code>, the alerts shown on the message that aren't on the case yet. It's what drives state 3 of the
+<a href="../../using/incident-messages/#incident-states">incident message</a>.</p>
+<p>The important bit is that <code>recordCase</code> takes the ids that <em>actually</em> attached, not the ids it tried to attach. A partial attach reporting success would under-report pending, and the analyst would never find out an alert is missing from the case.</p>
+<p><code>ruleCountsFor(rec, ids)</code> computes a rule breakdown over any subset, so the "N new alerts" section can show a breakdown for just the pending ones. It reads off the record rather than off whatever batch triggered the render, otherwise a pending alert left over from an earlier tick goes missing from the count the analyst reads.</p>
+<h2 id="reaping">Reaping<a class="headerlink" href="#reaping" title="Permanent link">&para;</a></h2>
+<p><code>sweep()</code> runs at the top of every alert poll, so the store stays bounded without needing its own timer. A record is dropped when either:</p>
+<ul>
+<li><code>now - lastActivityAt &gt;= INCIDENT_IDLE_MS</code> (8h default). Pick something like a shift length rather than something short.</li>
+<li><code>now - createdAt &gt;= INCIDENT_MAX_LIFETIME_MS</code> (24h default). To prevent infinitely growing cases.</li>
+</ul>
+<p>A reaped incident isn't deleted from Slack. The message stays with whatever buttons it last had, and those buttons report that the incident has closed out.</p>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../grouping/" class="btn btn-neutral float-left" title="Alert Grouping"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../cases/" class="btn btn-neutral float-right" title="Cases">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/charlottecroce/elastibot-v2" class="fa fa-code-fork" style="color: #fcfcfc"> elastibot-v2</a>
+        </span>
+    
+    
+      <span><a href="../grouping/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../cases/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+      <script src="../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

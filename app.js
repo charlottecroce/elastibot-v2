@@ -13,13 +13,24 @@ const { startWatchers } = require('./src/watchers');
 /*
  * Bootstrap only.
  *
- *   process handlers > config validation > context > slack app > commands > watchers > shutdown
+ *   logging > process handlers > config validation > context > slack app > commands > watchers > shutdown
  */
 
 const log = logger.child({ scope: 'app' });
 
 async function main() {
-  // Registered first so it covers everything below. Hooks are collected as the
+  /*
+   * Logging first, so everything below - including the config warnings
+   * validateConfig is about to emit - honours the operator's chosen level and
+   * format. util/logger has no dependency on config
+   *
+   * configure() ignores an unrecognised level/format rather than throwing,
+   * because validateConfig is the thing that reports those properly - and it
+   * needs a working logger to do it
+   */
+  logger.configure(config.logging);
+
+  // Registered next so it covers everything below. Hooks are collected as the
   // pieces they clean up come into existence
   const fatalHooks = [];
   registerProcessHandlers({

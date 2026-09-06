@@ -1,0 +1,10 @@
+# Built mkdocs site. Committed to the repo by .github/workflows/docs.yml, and ships bundled theme JS (jquery, highlight.js) that isn't ours to lint.
+docs/
+
+# Coverage report ships prettify.js, sorter.js, block-navigation.js
+coverage/
+
+# Local persistence. JSON only rn, but keep the linter out of it.
+data/
+
+# node_modules/ and dot-directories are ignored by ESLint's own defaults.

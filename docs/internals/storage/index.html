@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>Storage - elastibot-v2</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Storage";
+        var mkdocs_page_input_path = "internals/storage.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> elastibot-v2
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">Table of Contents</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Getting Started</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../getting-started/install/">Installation</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../getting-started/api-keys/">Elastic API Keys</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Using Elastibot</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../using/commands/">Slash Commands</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../using/incident-messages/">Incident Messages</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">How It Works</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../architecture/">Architecture</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../watchers/">The Watchers</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../grouping/">Alert Grouping</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../incidents/">Incidents</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cases/">Cases</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">Storage</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#the-three-storage-files">The three storage files</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#encryption-at-rest">Encryption at rest</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#caching">Caching</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#backups">Backups</a>
+    </li>
+    </ul>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Reference</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../reference/configuration/">Configuration</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../reference/logging/">Logging and Errors</a>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../../developer-guide/">Developer Guide</a>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">elastibot-v2</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">How It Works</li>
+      <li class="breadcrumb-item active">Storage</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/charlottecroce/elastibot-v2/edit/main/docs_src/internals/storage.md">Edit on elastibot-v2</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="storage">Storage<a class="headerlink" href="#storage" title="Permanent link">&para;</a></h1>
+<p>Everything persistent is JSON on local disk under <code>data/</code>.</p>
+<h2 id="the-three-storage-files">The three storage files<a class="headerlink" href="#the-three-storage-files" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Class</th>
+<th>Holds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>data/users.json</code></td>
+<td><code>UserStore</code></td>
+<td>Slack user ID → <code>{ kibanaUsername, apiKey }</code>, key encrypted</td>
+</tr>
+<tr>
+<td><code>data/state.json</code></td>
+<td><code>StateStore</code></td>
+<td>watcher cursors - <code>alertsLastTs</code>, <code>casesLastTs</code> (per space)</td>
+</tr>
+<tr>
+<td><code>data/incidents.json</code></td>
+<td><code>IncidentStore</code></td>
+<td>posted incidents, their cases, their claims</td>
+</tr>
+</tbody>
+</table>
+<p>Paths are overridable with <code>USER_STORE_PATH</code>, <code>STATE_PATH</code> and
+<code>INCIDENT_STORE_PATH</code>.</p>
+<p>Only <code>users.json</code> holds credentials. Losing <code>incidents.json</code> doesn't leak anything, but every open incident forgets its case and starts offering a <strong>create case</strong> button again. Losing <code>state.json</code> re-baselines the watchers to <em>now</em> and drops every alert between the loss and the restart.</p>
+<p>All three stores extend <code>JsonFileStore</code>, which gives them:</p>
+<p><strong>Atomic writes.</strong> Write to a temp file, then rename. A crash mid-write leaves the previous contents intact rather than a truncated file, which matters a lot for <code>state.json</code>. A truncated one reads back as "no cursor", which silently re-baselines the watchers.</p>
+<p><strong>Mode 0600</strong>, and the parent directory is created if it doesn't exist.</p>
+<p><strong>Write-through by default</strong> (<code>debounceMs = 0</code>), so <code>set()</code> is synchronous from the caller's point of view. Debouncing is supported but not used: a registration that appeared to succeed has to survive an immediate crash, and a claim that isn't on disk when the process dies is a claim that never existed.</p>
+<p><strong>Failure tolerance on read.</strong> A missing file is normal (first boot) and logged at <code>debug</code>. A file that exists but won't parse is <em>not</em> normal: it's logged at <code>error</code> with a "restore from backup before restarting" remedy, and the store starts empty rather than crashing at boot.</p>
+<p>A failed write is logged, not thrown, as to not crash the watcher loop.</p>
+<p><code>flush()</code> is called on shutdown to write anything pending.</p>
+<h2 id="encryption-at-rest">Encryption at rest<a class="headerlink" href="#encryption-at-rest" title="Permanent link">&para;</a></h2>
+<p>Analyst API keys are encrypted with AES-256-GCM before they touch disk (<code>src/util/crypto.js</code>). The key comes from <code>ELASTIBOT_SECRET_KEY</code>, derived with scrypt and a per-value random salt.</p>
+<p>The envelope, base64 after an <code>enc:</code> prefix:</p>
+<pre class="codehilite"><code>[1 byte version][16 byte salt][12 byte iv][16 byte gcm tag][ciphertext]
+</code></pre>
+
+<p>Some properties that follow from that:</p>
+<ul>
+<li>the same input encrypts differently every time (random IV)</li>
+<li>a wrong secret or a tampered blob fails the GCM auth tag rather than decrypting to garbage</li>
+<li>an encrypted value with no secret configured throws, naming the env var</li>
+<li>with no secret configured at all, values are stored <strong>as-is</strong> and the operator is warned at boot and the analyst is warned in their <code>/start</code> DM</li>
+</ul>
+<p>scrypt derivation is 50–100ms, which is why decrypted records are cached rather than derived per request.</p>
+<h2 id="caching">Caching<a class="headerlink" href="#caching" title="Permanent link">&para;</a></h2>
+<p>Four caches, all TTL'd:</p>
+<table>
+<thead>
+<tr>
+<th>Cache</th>
+<th>TTL var</th>
+<th>Why the TTL exists</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>decrypted user records</td>
+<td><code>USER_CACHE_TTL_MS</code> (5m)</td>
+<td>bounds how long a rotated key lingers in memory</td>
+</tr>
+<tr>
+<td>per-analyst Elastic clients</td>
+<td><code>ELASTIC_CLIENT_TTL_MS</code> (15m)</td>
+<td>bounds the window in which a revoked key still has a working client</td>
+</tr>
+<tr>
+<td>space display names</td>
+<td><code>SPACE_NAME_TTL_MS</code> (1h)</td>
+<td>spaces very rarely get renamed; an hour of renaming delay is a fine trade for one lookup per space per hour</td>
+</tr>
+<tr>
+<td>—</td>
+<td><code>ELASTIC_MAX_CLIENTS</code> (250)</td>
+<td>ceiling on the client cache</td>
+</tr>
+</tbody>
+</table>
+<p><code>USER_CACHE_TTL_MS=0</code> is read as "don't cache" and floored to 1ms, not as "never expire". the underlying <code>TtlCache</code> reads <code>0</code> the other way round, and an operator setting zero means the opposite of what the cache does.</p>
+<p>The space cache is keyed on space ID only, not on whose key asked, since the display name is a property of the space.</p>
+<p>On shutdown, <code>ctx.close()</code> clears the decrypted-key cache and the space cache.</p>
+<h2 id="backups">Backups<a class="headerlink" href="#backups" title="Permanent link">&para;</a></h2>
+<p>Every store is write-through partly because of this: anything that copies <code>data/</code> out from under a live process captures whatever was last written.</p>
+<p>If you restore a <code>state.json</code> older than what's actually been posted, you rewind the cursor onto alerts that are already in the channel. The <code>findByAlertId</code> filter in the alert watcher catches most of that (any alert already on a live incident record is dropped), but incidents that have since been reaped aren't protected, and they'll be posted again.</p>
+<p>My Suggestion: Back up <code>users.json</code>, because losing it means every analyst has to re-run <code>/start</code>. The other two files are cheap to lose and expensive to restore wrong.</p>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../cases/" class="btn btn-neutral float-left" title="Cases"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../../reference/configuration/" class="btn btn-neutral float-right" title="Configuration">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/charlottecroce/elastibot-v2" class="fa fa-code-fork" style="color: #fcfcfc"> elastibot-v2</a>
+        </span>
+    
+    
+      <span><a href="../cases/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../../reference/configuration/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+      <script src="../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

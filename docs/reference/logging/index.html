@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>Logging and Errors - elastibot-v2</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Logging and Errors";
+        var mkdocs_page_input_path = "reference/logging.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> elastibot-v2
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">Table of Contents</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Getting Started</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../getting-started/install/">Installation</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../getting-started/api-keys/">Elastic API Keys</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Using Elastibot</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../using/commands/">Slash Commands</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../using/incident-messages/">Incident Messages</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">How It Works</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/architecture/">Architecture</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/watchers/">The Watchers</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/grouping/">Alert Grouping</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/incidents/">Incidents</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/cases/">Cases</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../internals/storage/">Storage</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Reference</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../configuration/">Configuration</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">Logging and Errors</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#log-records">Log records</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#redaction">Redaction</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#trace-ids">Trace IDs</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#user-facing-vs-unexpected-errors">User-facing vs unexpected errors</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#retries">Retries</a>
+    </li>
+    </ul>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../../developer-guide/">Developer Guide</a>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">elastibot-v2</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Reference</li>
+      <li class="breadcrumb-item active">Logging and Errors</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/charlottecroce/elastibot-v2/edit/main/docs_src/reference/logging.md">Edit on elastibot-v2</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="logging-and-errors">Logging and Errors<a class="headerlink" href="#logging-and-errors" title="Permanent link">&para;</a></h1>
+<p>Everything logs through <code>src/util/logger.js</code> rather than <code>console.*</code>, so output has consistent structure, secrets get redacted before they can reach a log sink, and noise can be turned down per environment with one env var.</p>
+<p><code>util/logger</code> requires nothing. It's the bottom of the dependency tree.</p>
+<h2 id="log-records">Log records<a class="headerlink" href="#log-records" title="Permanent link">&para;</a></h2>
+<pre class="codehilite"><code class="language-js">const { logger } = require('./util/logger');
+const log = logger.child({ scope: 'watcher:alerts' });
+
+log.info('posted incident', { channel, count: 3 });
+log.error('post failed', { err });   // `err` is serialized specially
+</code></pre>
+
+<p>Levels: <code>trace</code> &lt; <code>debug</code> &lt; <code>info</code> &lt; <code>warn</code> &lt; <code>error</code> &lt; <code>fatal</code> &lt; <code>silent</code>.</p>
+<p>Child loggers carry their fields down, which is how every line for one Slack interaction ends up tagged with the same <code>scope</code>, <code>traceId</code> and <code>slackUserId</code>.</p>
+<p>Two formats: <code>pretty</code> and <code>json</code>.</p>
+<p>A convention worth following: warnings and errors that an operator can act on carry a <code>remedy</code> field naming the thing to change.</p>
+<pre class="codehilite"><code>poll hit the fetch ceiling - alerts may arrive faster than they are posted
+  fetchSize=200 remedy=&quot;raise WATCH_FETCH_SIZE or lower WATCH_POLL_MS&quot;
+</code></pre>
+
+<h2 id="redaction">Redaction<a class="headerlink" href="#redaction" title="Permanent link">&para;</a></h2>
+<p>Field names that look secret get replaced wholesale. Anything matching <code>api_key</code>, <code>token</code>, <code>secret</code>, <code>password</code>, <code>authorization</code>, <code>credential</code>, <code>encryptionkey</code>, <code>signing</code>.</p>
+<p>Secret-looking values inside otherwise innocent strings (a URL, an error message, a stack trace) get pattern-matched out:</p>
+<ul>
+<li><code>xox[baprs]-…</code> and <code>xapp-…</code> Slack tokens</li>
+<li><code>ApiKey &lt;blob&gt;</code> Authorization header values</li>
+<li><code>enc:&lt;blob&gt;</code>, Elastibot's own at-rest ciphertext</li>
+</ul>
+<p>Beyond that, some call sites deliberately don't log things at all. The <code>/start</code> auto-provision path never logs the admin username, the admin password, or any part of the key it created, only the key's id and name.</p>
+<h2 id="trace-ids">Trace IDs<a class="headerlink" href="#trace-ids" title="Permanent link">&para;</a></h2>
+<p>The registrar mints an 8-character <code>traceId</code> for every command, button and modal submission. It goes on every log line for that interaction, and on unexpected errors it's echoed to the analyst:</p>
+<pre class="codehilite"><code>:x: Something went wrong on my end (ref `a1b2c3d4`).
+</code></pre>
+
+<p>So an analyst can just <code>grep a1b2c3d4</code> and make finding the exact error log a bit easier.</p>
+<h2 id="user-facing-vs-unexpected-errors">User-facing vs unexpected errors<a class="headerlink" href="#user-facing-vs-unexpected-errors" title="Permanent link">&para;</a></h2>
+<p><code>src/util/errors.js</code> draws one line, and <code>handleHandlerError</code> acts on it.</p>
+<p><strong><code>UserFacingError</code></strong> is bad input, a missing alert, a rejected key, etc. Logged at <code>info</code> as <code>request rejected</code>, and the message goes straight to the analyst because it's something they can act on. If the command declared a <code>userErrorSuffix</code> (usually its usage string), that gets appended.</p>
+<p><strong>Anything else</strong> is a defect or a dependency failure. Full detail goes to the log at <code>error</code>; the analyst gets the trace reference and nothing else, because the real message is frequently an internal hostname:</p>
+<pre class="codehilite"><code>log:   handler failed  err=&quot;ECONNREFUSED 10.0.0.5:9200&quot;
+slack: :x: Something went wrong on my end (ref `bbbb2222`).
+</code></pre>
+
+<p><code>describeAxiosError(err, context)</code> is what turns HTTP failures into the first kind, with a message that names the fix:</p>
+<table>
+<thead>
+<tr>
+<th>condition</th>
+<th>message</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>401 / 403</td>
+<td>Elastic rejected your API key — re-run <code>/start</code></td>
+</tr>
+<tr>
+<td>404</td>
+<td>not found, plus whatever reason Elastic gave</td>
+</tr>
+<tr>
+<td>429</td>
+<td>Elastic is rate limiting us, try again shortly</td>
+</tr>
+<tr>
+<td><code>ECONNABORTED</code> / <code>ETIMEDOUT</code></td>
+<td>Elastic didn't answer in time</td>
+</tr>
+<tr>
+<td><code>ECONNREFUSED</code> / <code>ENOTFOUND</code></td>
+<td>couldn't reach Elastic — check <code>KIBANA_URL</code> / <code>ELASTICSEARCH_URL</code></td>
+</tr>
+<tr>
+<td>TLS errors</td>
+<td>names <code>ELASTIC_TLS_REJECT_UNAUTHORIZED</code> and the install-the-CA alternative</td>
+</tr>
+</tbody>
+</table>
+<p>Replying can't throw a second error on top of the first. If Slack itself is what's broken, that gets logged and the handler moves on rather than unwinding into Bolt.</p>
+<p>Above all that sit two catch-alls: Bolt's own error handler for anything escaping the registrar (middleware, deserialization), and process-level handlers for unhandled rejections and uncaught exceptions.</p>
+<h2 id="retries">Retries<a class="headerlink" href="#retries" title="Permanent link">&para;</a></h2>
+<p><code>src/util/retry.js</code> installs an axios interceptor on both the ES and Kibana clients. The policy is narrow on purpose:</p>
+<ul>
+<li><strong>reads only.</strong> A write is never retried however transient the failure looks. A duplicate case is worse than a failed one.</li>
+<li><strong>transient statuses only</strong>: 429, 502, 503, 504, and timeouts. A 404 isn't retried, because it won't stop being a 404.</li>
+<li>exponential backoff from <code>ELASTIC_RETRY_BASE_MS</code>, unless the response carries a <code>Retry-After</code>, which wins.</li>
+<li>budget is <code>ELASTIC_RETRIES</code>. When it's spent, the original error is rejected unchanged so <code>describeAxiosError</code> still sees the real thing.</li>
+</ul>
+<p>The retry counter lives on the axios config object, which is shared across attempts of the same request.</p>
+<p><code>(ELASTIC_RETRIES + 1) × ELASTIC_TIMEOUT_MS</code>. If that's at or above
+<code>WATCH_POLL_MS</code>, the runner's overlap guard starts skipping ticks, and
+<code>validateConfig</code> warns about exactly that at boot.</p>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../configuration/" class="btn btn-neutral float-left" title="Configuration"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../../developer-guide/" class="btn btn-neutral float-right" title="Developer Guide">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/charlottecroce/elastibot-v2" class="fa fa-code-fork" style="color: #fcfcfc"> elastibot-v2</a>
+        </span>
+    
+    
+      <span><a href="../configuration/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../../developer-guide/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+      <script src="../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

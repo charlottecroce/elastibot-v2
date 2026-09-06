@@ -111,4 +111,20 @@ describe('StateStore', () => {
     state.set('count', 0);
     expect(state.get('count', 99)).toBe(0);
   });
+
+  test('write-through is still the default, so a reopened store sees the value', () => {
+    const p = path.join(dir, 'nested-state.json');
+    new StateStore({ filePath: p }).set('alertsLastTs', 'ts-1');
+    expect(new StateStore({ filePath: p }).get('alertsLastTs', null)).toBe('ts-1');
+  });
+
+  test('with a debounce, flush() forces the pending write out', () => {
+    const p = path.join(dir, 'debounced-state.json');
+    const store = new StateStore({ filePath: p, debounceMs: 5000 });
+    store.set('alertsLastTs', 'ts-2');
+    expect(fs.existsSync(p)).toBe(false); // still buffered
+    store.flush();
+    expect(new StateStore({ filePath: p }).get('alertsLastTs', null)).toBe('ts-2');
+  });
+
 });

@@ -20,13 +20,13 @@ const { DEFAULT_SPACE, UNKNOWN_RULE } = require('./constants');
  */
 
 /*
- * The ingest timestamp. Every query in this file ranges and sorts on it:
- * getAlertsSince pages on it, getRelatedAlerts bounds the burst window on it,
- * and getAlertStats buckets on it. toAlert exposes it as `cursorTimestamp`.
+ * The ingest timestamp. Both remaining queries in this file range and sort on
+ * it: getAlertsSince pages on it and getAlertStats buckets on it. toAlert
+ * exposes it as `cursorTimestamp`.
  *
  * NOTE this is NOT the same field as alert.timestamp, which prefers
  * kibana.alert.@timestamp (the detection time) and falls back to this one.
- * Changing CURSOR_FIELD changes all three queries and watchers/alerts.js
+ * Changing CURSOR_FIELD changes both queries and watchers/alerts.js
  */
 const CURSOR_FIELD = '@timestamp';
 
@@ -147,33 +147,6 @@ function buildElasticClient(apiKey) {
         size,
         sort: [{ [CURSOR_FIELD]: 'asc' }],
         query: range,
-      });
-      return (data?.hits?.hits || []).map((hit) => toAlert(hit));
-    },
-
-    /**
-     * All alerts for a user + host in a space within [from, to] (inclusive)
-     * Used to combine a burst of related alerts into a single case
-     *
-     * `from` and `to` MUST be ingest timestamps (alert.cursorTimestamp), because
-     * that is the field ranged on below. Passing detection times
-     * (alert.timestamp, which prefers kibana.alert.@timestamp) returns the wrong
-     * set whenever the two clocks drift, and does it silently - the case is
-     * created, it just holds the wrong alerts. grouping.js supplies these as
-     * group.queryFrom / group.queryTo, kept separate from the from/to shown in
-     * the Slack message
-     */
-    async getRelatedAlerts({ spaceId, userName, hostName, from, to, size = 200 }) {
-      const must = [
-        { term: { 'user.name': userName } },
-        { term: { 'host.name': hostName } },
-        { range: { [CURSOR_FIELD]: { gte: from, lte: to } } },
-      ];
-      if (spaceId) must.push({ term: { 'kibana.space_ids': spaceId } });
-      const { data } = await es.post(alertsPath, {
-        size,
-        sort: [{ [CURSOR_FIELD]: 'asc' }],
-        query: { bool: { must } },
       });
       return (data?.hits?.hits || []).map((hit) => toAlert(hit));
     },
@@ -303,6 +276,59 @@ function buildElasticClient(apiKey) {
         params: { sortField: 'createdAt', sortOrder: 'desc', perPage },
       });
       return data?.cases || [];
+    },
+
+    /** Kibana spaces this API key can see */
+    async getSpaces() {
+      const { data } = await kib.get('/api/spaces/space');
+      return (data || []).map((space) => ({ id: space.id, name: space.name || space.id }));
+    },
+
+    /** One page of detection rules in a space */
+    async findDetectionRules(spaceId, { page = 1, perPage = 100 } = {}) {
+      const { data } = await kib.get(`${spacePath(spaceId)}/api/detection_engine/rules/_find`, {
+        params: { page, per_page: perPage, sort_field: 'name', sort_order: 'asc' },
+      });
+      return {
+        page: data?.page,
+        perPage: data?.perPage,
+        total: data?.total ?? 0,
+        data: data?.data || [],
+      };
+    },
+
+    /**
+     * One rule by its `rule_id` - the Sigma UUID - rather than its `id`, which
+     * Kibana generates per install. Null when this space doesn't have it
+     */
+    async getDetectionRuleByRuleId(spaceId, ruleId) {
+      try {
+        const { data } = await kib.get(`${spacePath(spaceId)}/api/detection_engine/rules`, {
+          params: { rule_id: ruleId },
+        });
+        return data || null;
+      } catch (err) {
+        if (err?.response?.status === 404) return null;
+        throw err;
+      }
+    },
+
+    /**
+     * Merge fields into an existing rule.
+     *
+     * PATCH, not PUT, and that is the whole reason index patterns, exceptions,
+     * highlighted fields and scheduling survive a sigma update: a field that
+     * isn't in the body is left alone rather than cleared
+     */
+    async patchDetectionRule(spaceId, patch) {
+      const { data } = await kib.patch(`${spacePath(spaceId)}/api/detection_engine/rules`, patch);
+      return data;
+    },
+
+    /** Create a detection rule from a converted Sigma rule */
+    async createDetectionRule(spaceId, rule) {
+      const { data } = await kib.post(`${spacePath(spaceId)}/api/detection_engine/rules`, rule);
+      return data;
     },
   };
 }

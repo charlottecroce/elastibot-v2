@@ -32,6 +32,7 @@ class TtlCache {
     this.onEvict = onEvict;
     this.entries = new Map(); // key > { value, expires }
     this.inflight = new Map(); // key > Promise
+    this._epoch = 0;
   }
 
   get size() {
@@ -77,6 +78,7 @@ class TtlCache {
   }
 
   clear() {
+    this._epoch += 1;
     if (this.onEvict) for (const [k, e] of this.entries) this.onEvict(k, e.value);
     this.entries.clear();
     this.inflight.clear();
@@ -100,13 +102,22 @@ class TtlCache {
     const pending = this.inflight.get(key);
     if (pending) return pending;
 
+    // Captured before the loader runs. If clear() bumps _epoch while this
+    // load is in flight, the eventual .then() below must not write the result
+    // back into `entries` - that would resurrect an entry the caller already
+    // asked to be rid of
+    const epoch = this._epoch;
+
     // The loader runs on a later tick, so the inflight entry below is always
     // registered before the cleanup can run. Invoking it inline would let a
     // synchronously-throwing loader delete the entry first, stranding the
     // rejected promise in the map for good
     const promise = Promise.resolve()
       .then(() => loader(key))
-      .then((value) => this.set(key, value))
+      .then((value) => {
+        if (epoch === this._epoch) this.set(key, value);
+        return value;
+      })
       .finally(() => this.inflight.delete(key));
 
     this.inflight.set(key, promise);

@@ -8,6 +8,7 @@ const {
 const { caseCreatedBlocks, alertAddedBlocks } = require('../services/format');
 const { renderIncident } = require('../services/incidentRender');
 const { withClaim, claimRefusal } = require('../services/incidentClaim');
+const { mrkdwnLink } = require('../util/mrkdwn');
 const { ACTIONS, COMMANDS } = require('../constants');
 
 /*
@@ -15,13 +16,11 @@ const { ACTIONS, COMMANDS } = require('../constants');
  *   Creates a case for THAT ONE ALERT in the alert's own space, titled per the
  *   naming scheme, and attaches it.
  *
- * Plus the three buttons the alert watcher puts on incident messages:
+ * Plus the two buttons the alert watcher puts on incident messages:
  *   Create case          takes the incident claim, files every alert on the
  *                        message into one case, re-renders the message
  *   Add N alerts to case attaches the pending alerts to the case that already
  *                        exists, re-renders the message
- *   View case            a url button. Slack still sends an interaction, so it
- *                        needs a registered no-op or Bolt warns on every click
  *
  * Swapping the green button for a grey one does NOT by itself make a duplicate
  * case impossible, which is the stated goal. Between the click and the message
@@ -34,6 +33,11 @@ const { ACTIONS, COMMANDS } = require('../constants');
  * half. The claim is taken synchronously before any network call, so the second
  * click loses instantly and gets told who is already on it. The button swap
  * then stops anyone reaching the click at all a second later
+ *
+ * Every case link below goes through mrkdwnLink. rec.caseLink is nullable -
+ * caseLinkForIncident returns null when no public base URL resolves - and
+ * Slack does not validate the url half of a mrkdwn link, so interpolating it
+ * directly renders the literal word "undefined" into the channel.
  */
 
 module.exports = function registerCase(reg) {
@@ -51,8 +55,9 @@ module.exports = function registerCase(reg) {
       if (existing?.caseId) {
         await reply.ephemeral(
           `Alert \`${alertId}\` is already part of an incident with case ` +
-            `<${existing.caseLink}|${existing.caseId}>. Use the *Add new alerts to case* ` +
-            'button on that message, or `/add_alert` if you want it somewhere else.'
+            `${mrkdwnLink(existing.caseLink, existing.caseId)}. ` +
+            'Use the *Add new alerts to case* button on that message, or `/add_alert` ' +
+            'if you want it somewhere else.'
         );
         return;
       }
@@ -133,7 +138,7 @@ module.exports = function registerCase(reg) {
   );
 
   /*
-   * Amber "Add N new alerts to case" - attaches everything on the message that
+   * Green "Add N new alerts to case" - attaches everything on the message that
    * isn't on the case yet
    */
   reg.action(
@@ -159,7 +164,9 @@ module.exports = function registerCase(reg) {
       const pending = ctx.incidents.pending(rec);
       if (!pending.length) {
         // Two people clicked; the first one already attached them
-        await reply.ephemeral(`Everything on this incident is already on <${rec.caseLink}|${rec.caseId}>.`);
+        await reply.ephemeral(
+          `Everything on this incident is already on ${mrkdwnLink(rec.caseLink, rec.caseId)}.`
+        );
         await renderIncident(client, ctx.incidents, key);
         return;
       }
@@ -209,10 +216,4 @@ module.exports = function registerCase(reg) {
     },
     { requireUser: true }
   );
-
-  /*
-   * "View case" is a url button. Slack delivers the interaction anyway; ack it
-   * and do nothing, or every click logs an unhandled action
-   */
-  reg.action(ACTIONS.VIEW_CASE, async () => {}, { requireUser: false });
 };

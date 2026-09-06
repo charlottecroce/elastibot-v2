@@ -1,5 +1,5 @@
 site_name: elastibot-v2
-site_description: Documentation for elastibot-v2
+site_description: Slack bot for turning Elastic alerts into Kibana cases
 repo_url: https://github.com/charlottecroce/elastibot-v2
 repo_name: elastibot-v2
 edit_uri: edit/main/docs_src/
@@ -12,8 +12,23 @@ theme:
   highlightjs: true
 
 nav:
-  - Getting Started: index.md
-  - About elastibot-v2: about.md
+  - Table of Contents: index.md
+  - Getting Started:
+      - Installation: getting-started/install.md
+      - Elastic API Keys: getting-started/api-keys.md
+  - Using Elastibot:
+      - Slash Commands: using/commands.md
+      - Incident Messages: using/incident-messages.md
+  - How It Works:
+      - Architecture: internals/architecture.md
+      - The Watchers: internals/watchers.md
+      - Alert Grouping: internals/grouping.md
+      - Incidents: internals/incidents.md
+      - Cases: internals/cases.md
+      - Storage: internals/storage.md
+  - Reference:
+      - Configuration: reference/configuration.md
+      - Logging and Errors: reference/logging.md
   - Developer Guide: developer-guide.md
 
 markdown_extensions:
@@ -22,3 +37,4 @@ markdown_extensions:
   - fenced_code
   - codehilite
   - admonition
+  - tables

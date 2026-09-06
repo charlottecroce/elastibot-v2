@@ -1,46 +1,18 @@
 'use strict';
 
 const config = require('../../config');
-const { ACTIONS, DEFAULT_SPACE } = require('../constants');
-
-/** Build a Kibana link to a case, respecting space + solution */
-function caseUrl(spaceId, caseId, owner) {
-  const base = (config.elastic.kibanaPublicUrl || '').replace(/\/$/, '');
-  const sp = spaceId && spaceId !== DEFAULT_SPACE ? `/s/${encodeURIComponent(spaceId)}` : '';
-  const id = encodeURIComponent(caseId);
-  if (owner === 'securitySolution') return `${base}${sp}/app/security/cases/${id}`;
-  if (owner === 'observability') return `${base}${sp}/app/observability/cases/${id}`;
-  return `${base}${sp}/app/management/insightsAndAlerting/cases/${id}`;
-}
-
-/** Escape the few characters that are special in Slack mrkdwn links/text */
-function esc(s) {
-  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-/** Render a { ruleName: count } map as "Rule A ×3, Rule B ×1" */
-function ruleBreakdown(ruleCounts, fallbackRule) {
-  if (ruleCounts && Object.keys(ruleCounts).length) {
-    return Object.entries(ruleCounts)
-      .map(([n, c]) => `${esc(n)} ×${c}`)
-      .join(', ');
-  }
-  return esc(fallbackRule);
-}
+const { esc, fenceSafe, fenceSafeToken, mrkdwnLink, ruleBreakdown } = require('../util/mrkdwn');
 
 /*
- * Helpers for the /stats tables. Those live inside ``` fences, where Slack does
- * NOT interpret mrkdwn - so they take plain(), not esc(). A stray backtick would
- * close the fence early, so it gets swapped out
+ * Slack message builders.
+ *
+ * functions that return Block Kit.
+ * The /stats table helpers stay because statsBlocks is their only consumer
+ *
+ * Anything rendered inside a ``` fence goes through fenceSafe (util/mrkdwn),
+ * not esc: Slack does not interpret mrkdwn in a fence, so the hazard is a
+ * stray backtick closing it early rather than an unescaped angle bracket
  */
-
-/** Single-line, fence-safe, length-capped text for use inside a code block */
-function plain(s, max = 34) {
-  const one = String(s ?? '')
-    .replace(/[`\r\n]+/g, ' ')
-    .trim();
-  return one.length > max ? `${one.slice(0, max - 1)}…` : one;
-}
 
 /** 1204 > "1,204" */
 function num(n) {
@@ -66,7 +38,9 @@ function sparkline(values) {
   const max = maxOf(values);
   if (!max) return ' '.repeat(values.length); // same glyph a zero gets below
   return values
-    .map((v) => (v === 0 ? ' ' : ticks[Math.min(ticks.length - 1, Math.ceil((v / max) * (ticks.length - 1)))]))
+    .map((v) =>
+      v === 0 ? ' ' : ticks[Math.min(ticks.length - 1, Math.ceil((v / max) * (ticks.length - 1)))]
+    )
     .join('');
 }
 
@@ -77,12 +51,16 @@ function sparkline(values) {
 function countTable(items, { barWidth = 10, labelWidth = 34 } = {}) {
   if (!items || !items.length) return '_nothing in this window_';
   const max = maxOf(items.map((i) => i.count));
-  const labels = items.map((i) => plain(i.label, labelWidth));
+  const labels = items.map((i) => fenceSafe(i.label, { max: labelWidth }));
   const nameW = maxOf(labels.map((l) => l.length));
   const countW = maxOf(items.map((i) => num(i.count).length));
   const lines = items.map((i, idx) => {
-    const row = `${labels[idx].padEnd(nameW)}  ${num(i.count).padStart(countW)}  ${bar(i.count, max, barWidth)}`;
-    return i.note ? `${row}  ${plain(i.note, 40)}` : row;
+    const row = `${labels[idx].padEnd(nameW)}  ${num(i.count).padStart(countW)}  ${bar(
+      i.count,
+      max,
+      barWidth
+    )}`;
+    return i.note ? `${row}  ${fenceSafe(i.note, { max: 40 })}` : row;
   });
   return `\`\`\`\n${lines.join('\n')}\n\`\`\``;
 }
@@ -127,19 +105,28 @@ function caseCreatedBlocks({
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `:white_check_mark: *Case created* by <@${slackUserId}>\n*<${link}|${esc(title)}>*`,
+        // mrkdwnLink, not string interpolation: a result object without `link`
+        // used to render the literal text "<undefined|SO-073026-Malware>"
+        text: `:white_check_mark: *Case created* by <@${slackUserId}>\n*${mrkdwnLink(link, title)}*`,
       },
     },
     { type: 'context', elements: meta },
     { type: 'context', elements: [rulesEl] },
     {
-      type: 'context',
-      elements: [
-        {
-          type: 'mrkdwn',
-          text: `Add more alerts with \`/add_alert ${esc(caseId)} <alertID>\``,
-        },
-      ],
+      /*
+       * The template with the real case id already in it, inside a fence.
+       *
+       * Not esc(): Slack does not interpret mrkdwn inside a fence, and a
+       * backtick in the id would close it early. fenceSafeToken specifically,
+       * because this is a runnable command and the id is one of its arguments -
+       * the old plain() here collapsed a backtick to a space, which would have
+       * split the id in two and pointed the command at something else
+       */
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `Add more alerts:\n\`\`\`\n/add_alert ${fenceSafeToken(caseId, { max: 128 })} <alertID>\n\`\`\``,
+      },
     },
   ];
   if (warning) {
@@ -160,90 +147,9 @@ function alertAddedBlocks({ caseId, alertId, ruleName, link, slackUserId }) {
         type: 'mrkdwn',
         text:
           `:heavy_plus_sign: <@${slackUserId}> added alert \`${esc(alertId)}\` ` +
-          `(${esc(ruleName)}) to case <${link}|${esc(caseId)}>`,
+          `(${esc(ruleName)}) to case ${mrkdwnLink(link, caseId)}`,
       },
     },
-  ];
-}
-
-/*
- * Watcher notification. One message per incident: a single alert renders as
- * before; a correlated burst renders as a rollup with a count, rule breakdown
- * and time window. The "Create case" button carries the encoded group descriptor
- */
-function alertGroupBlocks({
-  count = 1,
-  representativeRule,
-  ruleCounts,
-  topSeverity,
-  userName,
-  hostName,
-  spaceName,
-  from,
-  to,
-  alertId,
-  buttonValue,
-}) {
-  const button = {
-    type: 'actions',
-    elements: [
-      {
-        type: 'button',
-        style: 'primary',
-        text: { type: 'plain_text', text: count > 1 ? `Create case (${count} alerts)` : 'Create case' },
-        action_id: ACTIONS.CREATE_CASE_FROM_ALERT,
-        value: buttonValue || alertId,
-      },
-    ],
-  };
-
-  if (count > 1) {
-    return [
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text:
-            `:rotating_light: *${count} related alerts* — user \`${esc(userName)}\` ` +
-            `on host \`${esc(hostName)}\``,
-        },
-      },
-      {
-        type: 'context',
-        elements: [
-          { type: 'mrkdwn', text: `*Top severity:* ${esc(topSeverity)}` },
-          { type: 'mrkdwn', text: `*Space:* ${esc(spaceName)}` },
-          { type: 'mrkdwn', text: `*Window:* ${esc(from)} → ${esc(to)}` },
-        ],
-      },
-      {
-        type: 'context',
-        elements: [{ type: 'mrkdwn', text: `*Rules:* ${ruleBreakdown(ruleCounts, representativeRule)}` }],
-      },
-      button,
-    ];
-  }
-
-  // Single alert
-  const idLine = [];
-  if (userName) idLine.push({ type: 'mrkdwn', text: `*User:* \`${esc(userName)}\`` });
-  if (hostName) idLine.push({ type: 'mrkdwn', text: `*Host:* \`${esc(hostName)}\`` });
-  return [
-    {
-      type: 'section',
-      text: { type: 'mrkdwn', text: `:rotating_light: *New alert* — ${esc(representativeRule)}` },
-    },
-    {
-      type: 'context',
-      elements: [
-        { type: 'mrkdwn', text: `*Severity:* ${esc(topSeverity)}` },
-        { type: 'mrkdwn', text: `*Space:* ${esc(spaceName)}` },
-        { type: 'mrkdwn', text: `*When:* ${esc(from)}` },
-        { type: 'mrkdwn', text: `*Alert ID:* \`${esc(alertId)}\`` },
-        ...idLine,
-      ],
-    },
-    button,
   ];
 }
 
@@ -254,7 +160,7 @@ function newCaseBlocks({ title, caseId, spaceName, link, createdBy }) {
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `:open_file_folder: *New case* — *<${link}|${esc(title)}>*`,
+        text: `:open_file_folder: *New case* — *${mrkdwnLink(link, title)}*`,
       },
     },
     {
@@ -417,16 +323,12 @@ const STATS_USAGE =
   '_e.g._ `/stats 30d space:soc`';
 
 module.exports = {
-  caseUrl,
-  esc,
-  plain,
   num,
   bar,
   sparkline,
   countTable,
   caseCreatedBlocks,
   alertAddedBlocks,
-  alertGroupBlocks,
   newCaseBlocks,
   statsBlocks,
   STATS_USAGE,

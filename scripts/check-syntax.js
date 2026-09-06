@@ -12,7 +12,7 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const SKIP = new Set(['node_modules', 'coverage', 'data']);
+const SKIP = new Set(['node_modules', 'coverage', 'data', 'docs', 'docs_src']);
 
 function walk(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {

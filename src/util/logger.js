@@ -15,7 +15,13 @@
  *   log.error('post failed', { err });      // `err` is serialized specially
  *
  * Levels: trace < debug < info < warn < error < fatal < silent
- * Config: config.logging.{level,format,redact}  (LOG_LEVEL / LOG_FORMAT / LOG_REDACT)
+ *
+ * DEPENDENCIES: this module requires nothing. It is the bottom of the tree, and
+ * config/, store.js, elastic.js and the watchers all sit above it.
+ *
+ * env vars give a sane default from the first line of the process, and
+ * app.js calls logger.configure(config.logging) once config has been loaded.
+ * Anything logged before that point (there is very little) uses the env default.
  */
 
 const LEVELS = Object.freeze({
@@ -29,6 +35,8 @@ const LEVELS = Object.freeze({
 });
 
 const LEVEL_NAMES = Object.keys(LEVELS).filter((l) => l !== 'silent');
+
+const FORMATS = ['json', 'pretty'];
 
 // ---------------------------------------------------------------------------
 // Redaction
@@ -182,35 +190,49 @@ function formatPretty(rec, { color }) {
 }
 
 // ---------------------------------------------------------------------------
-// Logger
+// Settings
 // ---------------------------------------------------------------------------
 
+const FALSY = new Set(['false', '0', 'no', 'off']);
+
 /**
- * Resolve settings without hard-depending on config, so the logger stays usable
- * if config itself blows up (and so tests that stub config don't break it)
+ * The pre-config default. Env vars only - no require of config/, deliberately.
+ *
+ * Malformed values fall back rather than throwing: this runs before
+ * validateConfig has had a chance to tell the operator what they got wrong, and
+ * a logger that throws at import time turns a one-line config typo into an
+ * unexplained boot failure. config/validate.js reports LOG_LEVEL / LOG_FORMAT
+ * properly a moment later
  */
-function resolveSettings() {
-  let cfg = {};
-  try {
-    cfg = require('../../config').logging || {};
-  } catch {
-    /* config unavailable or still loading - fall back to env */
-  }
+function defaultSettings() {
+  const envLevel = process.env.LOG_LEVEL;
+  const level =
+    envLevel && envLevel in LEVELS
+      ? envLevel
+      : // Keep a test run quiet unless it explicitly asks otherwise. Previously
+        // this came from config.logging via tests/setup.js, which is exactly the
+        // backwards dependency being removed here
+        (process.env.NODE_ENV === 'test' ? 'silent' : 'info');
 
-  let level = process.env.LOG_LEVEL || cfg.level || 'info';
-  if (!(level in LEVELS)) level = 'info';
+  const envFormat = process.env.LOG_FORMAT;
+  const format = envFormat && FORMATS.includes(envFormat) ? envFormat : 'pretty';
 
-  const format = process.env.LOG_FORMAT || cfg.format || 'pretty';
-  const redactEnabled = cfg.redact === undefined ? true : Boolean(cfg.redact);
+  // Redaction is opt-OUT and must stay that way: the default has to be safe for
+  // anyone who never read this file
+  const envRedact = String(process.env.LOG_REDACT ?? '').trim().toLowerCase();
+  const redact = !FALSY.has(envRedact);
 
-  return { level, format, redact: redactEnabled };
+  return { level, format, redact };
 }
 
-// One process-wide settings object, resolved on first use. Loggers created with
-// `settings = null` follow it, so setLevel() on the root reaches every child
+/*
+ * One process-wide settings object. Loggers created with `settings = null`
+ * (the root and every child of it) follow this object by reference, so
+ * configure() and setLevel() reach all of them
+ */
 let sharedSettings = null;
 function getSharedSettings() {
-  if (!sharedSettings) sharedSettings = resolveSettings();
+  if (!sharedSettings) sharedSettings = defaultSettings();
   return sharedSettings;
 }
 
@@ -228,6 +250,31 @@ class Logger {
 
   get settings() {
     return this._settings || getSharedSettings();
+  }
+
+  /**
+   * Apply the loaded configuration. Called once from app.js with
+   * config.logging, after config/index.js has been read.
+   *
+   * On the root logger this mutates the shared settings object, so every child
+   * created before or after this call sees the new values. Unrecognised values
+   * are ignored rather than thrown: this is called before validateConfig, which
+   * is the thing that actually reports a bad LOG_LEVEL to the operator
+   *
+   * @param {object} [options]
+   * @param {string} [options.level]
+   * @param {string} [options.format]
+   * @param {boolean} [options.redact]
+   * @returns {Logger} this, for chaining
+   */
+  configure({ level, format, redact: redactEnabled } = {}) {
+    const target = this._settings || getSharedSettings();
+
+    if (level !== undefined && level in LEVELS) target.level = level;
+    if (format !== undefined && FORMATS.includes(format)) target.format = format;
+    if (redactEnabled !== undefined) target.redact = Boolean(redactEnabled);
+
+    return this;
   }
 
   /** Derive a logger that stamps extra fields on every record (e.g. a scope) */
@@ -288,14 +335,23 @@ for (const level of LEVEL_NAMES) {
 
 /**
  * Build an independent logger with its own settings - handy for tests
- * (pass a sink to capture records). Detached from the shared settings object
+ * (pass a sink to capture records). Detached from the shared settings object,
+ * so logger.configure() does NOT reach it
  */
 function createLogger({ bindings = {}, sink = null, ...overrides } = {}) {
-  const settings = { ...resolveSettings(), ...overrides };
+  const settings = { ...defaultSettings(), ...overrides };
   return new Logger(bindings, settings, sink);
 }
 
 /** The process-wide root logger. Prefer `logger.child({ scope })` at module top */
 const logger = new Logger({});
 
-module.exports = { logger, createLogger, Logger, LEVELS, redact, serializeError };
+module.exports = {
+  logger,
+  createLogger,
+  Logger,
+  LEVELS,
+  redact,
+  serializeError,
+  defaultSettings,
+};

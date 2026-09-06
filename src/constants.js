@@ -6,19 +6,27 @@
  * and a command registration, a state file key and its reader) lives here
  */
 
-/** Slack action_ids (buttons, selects) */
+/*
+ * Slack action_ids (buttons, selects)
+ */
 const ACTIONS = Object.freeze({
   CREATE_CASE_FROM_ALERT: 'create_case_from_alert',
   // "Add N new alerts to case" - attaches everything on an incident message
   // that isn't on its case yet
   ADD_ALERTS_TO_CASE: 'add_alerts_to_case',
-  // "View case" is a url button. Slack still delivers an interaction for those,
-  // so it needs a registered no-op handler or Bolt logs an unhandled action on
-  // every single click
-  VIEW_CASE: 'view_case',
   // /start's radio input toggling between "paste my own key" and "create one
   // for me" - swaps the modal's blocks via views.update
   START_METHOD_SELECT: 'start_method_select',
+
+  // /sigma - the space picker shown before anything is read or written
+  SIGMA_SPACE_SELECT: 'sigma_space_select',
+  // Back / Next on a paged result set. The value carries the target page
+  SIGMA_PAGE: 'sigma_page',
+  SIGMA_RULE_UPDATE: 'sigma_rule_update',
+  SIGMA_RULE_ADD: 'sigma_rule_add',
+  // A link button. It has a handler only so Bolt stops warning about an
+  // unhandled interaction on every click
+  SIGMA_RULE_VIEW: 'sigma_rule_view',
 });
 
 /** Slack view callback_ids (modals) */
@@ -32,6 +40,7 @@ const COMMANDS = Object.freeze({
   CASE: '/case',
   ADD_ALERT: '/add_alert',
   STATS: '/stats',
+  SIGMA: '/sigma',
 });
 
 /** Keys in data/state.json */

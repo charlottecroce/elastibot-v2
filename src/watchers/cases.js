@@ -1,8 +1,10 @@
 'use strict';
 
 const config = require('../../config');
-const { caseUrl, newCaseBlocks } = require('../services/format');
+const { newCaseBlocks } = require('../services/format');
+const { caseUrl } = require('../services/kibanaLinks');
 const { STATE_KEYS } = require('../constants');
+const { sleep } = require('../util/sleep');
 const { logger } = require('../util/logger');
 
 /*
@@ -19,7 +21,6 @@ const { logger } = require('../util/logger');
  */
 
 const log = logger.child({ scope: 'watcher:cases' });
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * @param {object} deps  same shape as pollAlerts

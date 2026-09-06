@@ -8,6 +8,12 @@ const { logger } = require('./util/logger');
 
 /*
  * The application context: everything with a lifetime longer than one request.
+ *
+ * Both persisted stores are write-through. A buffered alert cursor is only ever
+ * as good as the last flush, and anything that copies data/ out from under a
+ * live process - a backup, a container snapshot - captures a state.json older
+ * than what has actually been posted. Restoring that rewinds the cursor onto
+ * alerts already in the channel and they get posted twice.
  */
 
 /**
@@ -24,25 +30,17 @@ function createContext(overrides = {}) {
       encryptionKey: config.security.encryptionKey,
     });
 
-  const state =
-    overrides.state ||
-    new StateStore({
-      filePath: config.security.statePath,
-      debounceMs: config.security.stateDebounceMs,
-    });
+  const state = overrides.state || new StateStore({ filePath: config.security.statePath });
 
   /*
    * Posted incidents, so a block kit can be updated on a later poll tick and so
-   * two analysts can't open two cases for the same burst. Write-through
-   * regardless of STATE_DEBOUNCE_MS: a create-case claim that isn't on disk when
-   * the process dies is a claim that never existed, and the duplicate this
-   * whole store exists to prevent gets through on restart
+   * two analysts can't open two cases for the same burst. A create-case claim
+   * that isn't on disk when the process dies is a claim that never existed
    */
   const incidents =
     overrides.incidents ||
     new IncidentStore({
       filePath: config.security.incidentStorePath,
-      debounceMs: 0,
       idleMs: config.incidents.idleMs,
       maxLifetimeMs: config.incidents.maxLifetimeMs,
       claimTtlMs: config.incidents.claimTtlMs,
@@ -51,7 +49,7 @@ function createContext(overrides = {}) {
   // Shared with caseService, so a watcher lookup warms the cache for /case
   const spaces = overrides.spaces || getSharedSpaceService();
 
-  const ctx = {
+  return {
     users,
     state,
     incidents,
@@ -73,8 +71,6 @@ function createContext(overrides = {}) {
       log.debug('context closed');
     },
   };
-
-  return ctx;
 }
 
 module.exports = { createContext };

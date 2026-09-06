@@ -28,6 +28,10 @@ features:
       description: Aggregate view of the alerts index - top and noisiest rules, hosts, users, timing
       usage_hint: "[window] [filters] [share]"
       should_escape: false
+    - command: /sigma
+      description: Compare Elastic detection rules against the Sigma rule database
+      usage_hint: "update | search <keyword> | status [space:<id>]"
+      should_escape: false
 
 oauth_config:
   scopes:
