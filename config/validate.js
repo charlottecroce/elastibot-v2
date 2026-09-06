@@ -9,28 +9,24 @@ const { validateFeatureConfig } = require('../src/features/config');
  * Config validation. Collects every problem before throwing, so an operator
  * fixes one round of mistakes instead of one mistake per restart.
  *
- * ---------------------------------------------------------------------------
- * WHAT CHANGED IN THE CORE-PLUS-FEATURES MOVE
- * ---------------------------------------------------------------------------
- * The --- Naming ---, --- Stats --- and --- Sigma --- sections are gone from
- * this file. They now live in each feature's config.js next to the defaults they
- * check, which is the point: a setting and its validation should not be able to
- * drift across a folder boundary, and deleting a feature should delete its
- * validation with it.
+ * The --- Naming ---, --- Stats ---, --- Sigma --- and --- Watchers --- sections
+ * are gone from this file. They live in each feature's config.js next to the
+ * defaults they check, which is the point: a setting and its validation should
+ * not be able to drift across a folder boundary, and deleting a feature should
+ * delete its validation with it.
  *
  * The collect-everything behaviour survives the split intact. Feature validators
  * are handed the SAME errors and warnings arrays, so a bad sigma page size and a
- * missing Slack token still come out of one boot together.
- *
- * Feature validators run even for disabled features. A setting that is wrong in
- * the file is worth reporting before somebody switches the feature on and hits
- * it at three in the morning.
+ * missing Slack token still come out of one boot together. They also run for
+ * DISABLED features: a setting that is wrong in the file is worth reporting
+ * before somebody switches the feature on and hits it at three in the morning.
  */
 
 const log = logger.child({ scope: 'config' });
 
 const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'];
 const LOG_FORMATS = ['json', 'pretty'];
+const CASE_OWNERS = ['securitySolution', 'observability', 'cases'];
 
 /**
  * @param {object} config
@@ -49,6 +45,12 @@ function validateConfig(config, { throwOnError = true } = {}) {
   const positiveInt = (value, name) => {
     if (!Number.isInteger(value) || value <= 0) {
       errors.push(`${name} must be a positive integer, got ${JSON.stringify(value)}`);
+    }
+  };
+
+  const nonNegativeInt = (value, name) => {
+    if (!Number.isInteger(value) || value < 0) {
+      errors.push(`${name} must be a non-negative integer, got ${JSON.stringify(value)}`);
     }
   };
 
@@ -78,12 +80,75 @@ function validateConfig(config, { throwOnError = true } = {}) {
   if (config.slack.botToken && !/^xoxb-/.test(config.slack.botToken)) {
     warnings.push('SLACK_BOT_TOKEN does not start with xoxb- - is that the bot token?');
   }
+  if (config.slack.appToken && !/^xapp-/.test(config.slack.appToken)) {
+    warnings.push('SLACK_APP_TOKEN does not start with xapp- - is that the app-level token?');
+  }
 
-  // --- Elastic, logging, security, cache, watchers: unchanged, elided here ---
+  // --- Elastic ---
+  require_(config.elastic.kibanaUrl, 'KIBANA_URL');
+  require_(config.elastic.esUrl, 'ELASTICSEARCH_URL');
   url(config.elastic.kibanaUrl, 'KIBANA_URL');
+  url(config.elastic.kibanaPublicUrl, 'KIBANA_PUBLIC_URL');
   url(config.elastic.esUrl, 'ELASTICSEARCH_URL');
+  positiveInt(config.elastic.requestTimeoutMs, 'ELASTIC_TIMEOUT_MS');
+  positiveInt(config.elastic.maxSockets, 'ELASTIC_MAX_SOCKETS');
+  positiveInt(config.elastic.maxResponseBytes, 'ELASTIC_MAX_RESPONSE_BYTES');
+  nonNegativeInt(config.elastic.retries, 'ELASTIC_RETRIES');
+  positiveInt(config.elastic.retryBaseDelayMs, 'ELASTIC_RETRY_BASE_MS');
+  oneOf(config.elastic.defaultOwner, CASE_OWNERS, 'DEFAULT_CASE_OWNER');
+  require_(config.elastic.alertsIndex, 'ALERTS_INDEX');
+
+  if (config.elastic.tlsRejectUnauthorized === false) {
+    warnings.push(
+      'ELASTIC_TLS_REJECT_UNAUTHORIZED=false - TLS certificates are not being verified. ' +
+      'Fine for an internal cluster with a self-signed cert, not fine otherwise'
+    );
+  }
+
+  // --- Logging ---
   oneOf(config.logging.level, LOG_LEVELS, 'LOG_LEVEL');
   oneOf(config.logging.format, LOG_FORMATS, 'LOG_FORMAT');
+  if (config.logging.redact === false) {
+    warnings.push('LOG_REDACT=false - secrets will appear in the logs. Only ever do this locally');
+  }
+
+  // --- Security ---
+  if (!config.security.encryptionKey) {
+    warnings.push(
+      'ELASTIBOT_SECRET_KEY is not set - analyst API keys are stored on disk in PLAINTEXT. ' +
+      'Set a 32+ character secret and have every analyst re-run /start'
+    );
+  } else if (String(config.security.encryptionKey).length < 32) {
+    warnings.push(
+      `ELASTIBOT_SECRET_KEY is only ${config.security.encryptionKey.length} characters - ` +
+      'use at least 32'
+    );
+  }
+  require_(config.security.userStorePath, 'USER_STORE_PATH');
+  require_(config.security.statePath, 'STATE_PATH');
+  require_(config.security.incidentStorePath, 'INCIDENT_STORE_PATH');
+
+  // --- Cache ---
+  positiveInt(config.cache.spaceNameTtlMs, 'SPACE_NAME_TTL_MS');
+  positiveInt(config.cache.clientTtlMs, 'ELASTIC_CLIENT_TTL_MS');
+  positiveInt(config.cache.maxClients, 'ELASTIC_MAX_CLIENTS');
+  nonNegativeInt(config.cache.userTtlMs, 'USER_CACHE_TTL_MS');
+
+  // --- Config file hygiene ---
+  if (config.source?.permissions?.tooOpen) {
+    warnings.push(
+      `${config.source.file} is readable by more than its owner - it holds every credential ` +
+      'this bot has. chmod 600 it'
+    );
+  }
+  for (const { key, env } of config.source?.shadowed || []) {
+    warnings.push(
+      `${key} is set in both elastibot.yml and ${env} - the file won and ${env} did nothing`
+    );
+  }
+  for (const { key, env } of config.source?.unresolved || []) {
+    warnings.push(`${key} references \${${env}}, which is not set - treated as unconfigured`);
+  }
 
   /*
    * --- Features ---

@@ -1,5 +1,8 @@
 'use strict';
 
+const { logger } = require('../../core/util/logger');
+// const { caseLinkForIncident } = require('../../core/services/kibanaLinks');
+
 /*
  * The create-case claim wrapper used by commands/case.js's button handlers,
  * plus the message shown to whichever analyst loses the race.

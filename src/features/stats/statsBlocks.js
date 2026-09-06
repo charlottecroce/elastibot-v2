@@ -1,7 +1,7 @@
 'use strict';
 
-const config = require('../../config');
-const { esc, fenceSafe, fenceSafeToken, mrkdwnLink, ruleBreakdown } = require('./core/util/mrkdwn');
+const config = require('../../../config');
+const { esc, fenceSafe } = require('../../core/util/mrkdwn');
 
 /*
  * Slack message builders.

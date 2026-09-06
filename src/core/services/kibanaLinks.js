@@ -1,11 +1,24 @@
 'use strict';
 
-const config = require('../../config');
-const { DEFAULT_SPACE } = require('./constants');
-const { isAbsoluteHttpUrl } = require('./util/url');
+const config = require('../../../config');
+const { DEFAULT_SPACE } = require('../constants');
+const { isAbsoluteHttpUrl } = require('../util/url');
 
 /*
  * Kibana URL construction.
+ *
+ * THIS STAYS IN CORE, and it is the one file in the migration where the
+ * promotion rule points the other way from the folder name. `caseUrl` and
+ * `caseLinkForIncident` are cases-only, but `ruleUrl` backs /sigma's "View rule"
+ * link button. Two features, so it is core - splitting it would mean two copies
+ * of the base-url-and-space-prefix logic, and the failure mode of getting that
+ * wrong twice is a link that 404s or silently drops an analyst into the wrong
+ * space.
+ *
+ * It moves from src/core/kibanaLinks.js to src/core/services/ so it sits with
+ * spaceService and startService rather than loose at the top of core/. Two
+ * requires in the tree point at the old path and one points at a
+ * `./services/kibanaLinks` under features/cases that never existed.
  *
  * Everything here is built from config.elastic.kibanaPublicUrl (the endpoint an
  * analyst's *browser* reaches) rather than kibanaUrl (the endpoint Elastibot's
@@ -61,7 +74,7 @@ function caseLinkForIncident(rec) {
  * Link to a detection rule's page in the Security app.
  *
  * Keyed on the rule's Kibana `id`, not its `rule_id` - the UI routes on the
- * former
+ * former. This is the /sigma consumer that keeps this file in core.
  */
 function ruleUrl(spaceId, id) {
   const base = (config.elastic.kibanaPublicUrl || '').replace(/\/$/, '');

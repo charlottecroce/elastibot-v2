@@ -1,12 +1,14 @@
 'use strict';
 
-const config = require('../../config');
-const { createElasticClient } = require('../../core/elastic');
-const { buildCaseTitle, monthYearTag } = require('../naming');
-const { caseUrl } = require('../../core/kibanaLinks');
+const config = require('../../../config');
+const { getClient } = require('../../core/elastic');
+const { casesEndpoints } = require('./elastic');
+const { buildCaseTitle, monthYearTag } = require('./naming');
+const { caseUrl } = require('../../core/services/kibanaLinks');
 const { getSpaceName } = require('../../core/services/spaceService');
-const { attachInRuleBatches } = require('../../core/services/attachAlerts');
-const { ALERT_STATUS_FOR_CASE, DEFAULT_SPACE, UNKNOWN_RULE } = require('../../core/constants');
+const { attachInRuleBatches } = require('./attachAlerts');
+const { ALERT_STATUS_FOR_CASE } = require('./constants');
+const { DEFAULT_SPACE, UNKNOWN_RULE } = require('../../core/constants');
 const { UserFacingError, describeAxiosError } = require('../../core/util/errors');
 const { logger } = require('../../core/util/logger');
 
@@ -14,13 +16,24 @@ const { logger } = require('../../core/util/logger');
  * Case creation and alert attachment. Error types come from util/errors
  *
  * The per-rule attach loop (group alerts by rule, POST one comment per rule,
- * collect failures into a readable warning) lives in services/attachAlerts.js
- * now, not here. It used to be copy-pasted between createCaseFromAlerts and
+ * collect failures into a readable warning) lives in attachAlerts.js now, not
+ * here. It used to be copy-pasted between createCaseFromAlerts and
  * attachAlertsToCase and the two copies had already drifted - see that file's
- * header for the details
+ * header for the details.
+ *
+ * WHAT CHANGED IN THE REFACTOR: the client. `createElasticClient(apiKey)` is
+ * gone; core hands out a primitive and this feature adds its own endpoints on
+ * top. Every `client.getAlertById` / `client.createCase` / `client.getSpaceName`
+ * below is unchanged - the last one resolves through the prototype, because
+ * casesEndpoints returns an object whose prototype IS the core client.
  */
 
 const log = logger.child({ scope: 'service:case' });
+
+/** The analyst's client, with the cases endpoints on it */
+function clientFor(apiKey) {
+  return casesEndpoints(getClient(apiKey));
+}
 
 /** Format an ECS field for the description: join arrays, fall back to N/A */
 function fmtField(value) {
@@ -76,7 +89,7 @@ async function fetchAlertsByIds(client, alertIds) {
 }
 
 /**
- * Create one case from one OR many alerts (already fetched), in the shared space
+ * Create one case from one OR many alerts (already fetched), in the shared space.
  * Title uses the most common rule. Alerts are attached in per-rule batches (the
  * comments API takes one rule per alert-comment but accepts an array of alert ids)
  *
@@ -197,7 +210,7 @@ async function createCaseFromAlerts(client, alerts) {
  * @param {string} alertId
  */
 async function createCaseForAlert(apiKey, alertId) {
-  const client = createElasticClient(apiKey);
+  const client = clientFor(apiKey);
 
   let alert;
   try {
@@ -232,7 +245,7 @@ async function createCaseForAlert(apiKey, alertId) {
  * @returns {Promise<object>} same shape as createCaseFromAlerts, including attachedIds
  */
 async function createCaseForIds(apiKey, alertIds, { spaceId } = {}) {
-  const client = createElasticClient(apiKey);
+  const client = clientFor(apiKey);
 
   let alerts = await fetchAlertsByIds(client, alertIds);
   if (spaceId) alerts = alerts.filter((a) => a.spaceId === spaceId);
@@ -265,7 +278,7 @@ async function createCaseForIds(apiKey, alertIds, { spaceId } = {}) {
  * @returns {Promise<{caseId: string, attachedIds: string[], warning: string|null}>}
  */
 async function attachAlertsToCase(apiKey, { spaceId, caseId, alertIds }) {
-  const client = createElasticClient(apiKey);
+  const client = clientFor(apiKey);
 
   const alerts = await fetchAlertsByIds(client, alertIds);
   if (!alerts.length) {
@@ -308,7 +321,7 @@ async function attachAlertsToCase(apiKey, { spaceId, caseId, alertIds }) {
  * @returns {Promise<{caseId,alertId,ruleName,link}>}
  */
 async function addAlertToCase(apiKey, caseId, alertId) {
-  const client = createElasticClient(apiKey);
+  const client = clientFor(apiKey);
 
   let alert;
   try {

@@ -1,12 +1,13 @@
 'use strict';
 
-const config = require('../../config');
-const db = require('../sigma/db');
-const { STATE } = require('../sigma/state');
-const { diffRule, buildPatch, buildCreateBody } = require('../sigma/ruleDiff');
-const { unquote } = require('../sigma/parse');
-const { createElasticClient } = require('../../core/elastic');
+const config = require('../../../config');
+const { getClient } = require('../../core/elastic');
+const { sigmaEndpoints } = require('./elastic');
 const { getSpaceName } = require('../../core/services/spaceService');
+const db = require('./db');
+const { diffRule, normalizeRuleId } = require('./ruleDiff');
+const { STATE } = require('./state');
+const { buildCreateBody } = require('./convert');
 const { UserFacingError, describeAxiosError } = require('../../core/util/errors');
 const { logger } = require('../../core/util/logger');
 

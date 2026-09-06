@@ -1,27 +1,49 @@
 'use strict';
 
 /*
- * config/index.js - resolves every setting. Edit `elastibot.yml`, not this file.
+ * config/index.js - resolves CORE's settings, and folds in whatever the
+ * features contribute. Edit `elastibot.yml`, not this file.
  *
- * Each setting below is one `s(yamlKey, ENV_VAR, coercer, default)` call, and
- * that line is the single source of truth for its name, its type and its
+ * The `grouping`, `incidents`, `naming`, `stats`, `sigma` and `watchers` blocks
+ * are gone from here. They moved to the feature that owns them:
+ *
+ *   src/features/cases/config.js   grouping, incidents, naming, watchers
+ *   src/features/stats/config.js   stats
+ *   src/features/sigma/config.js   sigma
+ *
+ * Every resolved key path is unchanged. config.sigma.pageSize is still
+ * config.sigma.pageSize and config.watchers.pollIntervalMs is still
+ * config.watchers.pollIntervalMs, so no consumer and no test had to be touched
+ * to reorganise the tree.
+ *
+ * THE LOAD ORDER IS THE TRAP. This module builds its export at require time and
+ * tests/setup.js depends on that. The feature half of the tree is reached
+ * through src/features/config.js, which requires each feature's config.js
+ * DIRECTLY rather than through its descriptor - a descriptor requires services,
+ * services require config, and that cycle does not throw. It hands somebody a
+ * half-built object and the symptom lands somewhere unrelated.
+ *
+ * Each core setting below is one `s(yamlKey, ENV_VAR, coercer, default)` call,
+ * and that line is the single source of truth for its name, its type and its
  * default. Resolution order is YAML > env var > default; see config/loader.js.
  *
- * elastibot.yml holds everything, secrets included. loader.js checks the
- * mode at boot and complains if it's group- or world-readable.
- *
- * The env var on each line is still honored, for containers and orchestrators
- * that would rather inject a value than mount a file. Nothing reads a .env
- * file to populate them, though; they have to be genuinely exported.
+ * elastibot.yml holds everything, secrets included. loader.js checks the mode at
+ * boot and complains if it's group- or world-readable. The env var on each line
+ * is still honored, for containers that would rather inject a value than mount a
+ * file. Nothing reads a .env file to populate them.
  */
 
 require('path');
 const { loadConfigFile } = require('./loader');
+const { loadFeatureConfig } = require('../src/features/config');
 
 /*
  * Coercers. Each throws on malformed input, naming whichever source the value
  * came from. The loader supplies the default, so these only ever see a value
- * that is actually present
+ * that is actually present.
+ *
+ * Handed to the features on `s.coercers`. A feature defining its own `bool` is
+ * how you end up with "yes" being truthy in one namespace and not another.
  */
 
 class ConfigValueError extends Error { }
@@ -72,6 +94,8 @@ const map = (v, label) => {
   return Object.fromEntries(Object.entries(v).map(([k, val]) => [k, String(val)]));
 };
 
+const COERCERS = { bool, int, num, str, list, map };
+
 /*
  * Role descriptors, from the same JSON an admin would otherwise paste into
  * POST /_security/api_key by hand. An operator-supplied path is relative to the
@@ -89,7 +113,14 @@ const s = file.get;
 const isProd = process.env.NODE_ENV === 'production';
 const isTest = process.env.NODE_ENV === 'test';
 
-module.exports = {
+/*
+ * Resolved BEFORE the core object below, so that a feature claiming a core
+ * namespace throws with both names in the message rather than silently winning
+ * or losing depending on merge order.
+ */
+const featureConfig = loadFeatureConfig(s, COERCERS);
+
+const core = {
   /*
    * Where the settings came from. app.js logs this at boot and warns about:
    *   - `permissions`, when the file holding every credential is readable by
@@ -103,6 +134,19 @@ module.exports = {
     shadowed: file.shadowed,
     unresolved: file.unresolved,
   },
+
+  /*
+   * Which features are on. Resolved by src/features/config.js for every entry in
+   * src/features/registry.js, so this map always has one key per registered
+   * feature whether or not the operator mentioned it.
+   *
+   *   features:
+   *     sigma:
+   *       enabled: false
+   *
+   * or FEATURE_SIGMA_ENABLED=false
+   */
+  features: featureConfig.features,
 
   // How long shutdown gets to drain watchers and flush stores before a hard exit
   shutdownTimeoutMs: s('shutdown_timeout_ms', 'SHUTDOWN_TIMEOUT_MS', int, 15000),
@@ -119,6 +163,15 @@ module.exports = {
     port: s('slack.port', 'PORT', int, 3000), // only used when socketMode = false
   },
 
+  /*
+   * Elastic. Core keeps the CONNECTION and the alert INDEX; the endpoints that
+   * hang off them belong to features now.
+   *
+   * alerts_index and default_case_owner stay here rather than moving to cases,
+   * because the alert document schema in src/core/elastic/alerts.js has two
+   * consumers - cases reads alerts, stats aggregates over them - and one feature
+   * owning the index pattern the other one queries would be worse than either.
+   */
   elastic: {
     // --- secrets / endpoints ---
     // API endpoint - every request Elastibot makes goes here, so it must be the
@@ -160,10 +213,10 @@ module.exports = {
     retryBaseDelayMs: s('elastic.retry_base_ms', 'ELASTIC_RETRY_BASE_MS', int, 250),
 
     // Role descriptors granted to any API key Elastibot creates automatically
-    // via /start's "create one for me" option (src/commands/start.js,
-    // src/elastic.js#provisionAnalystApiKey). Loaded from the same file an
-    // admin would otherwise paste into POST /_security/api_key by hand, so the
-    // manual and automatic paths can never drift apart
+    // via /start's "create one for me" option (src/core/commands/start.js,
+    // src/core/elastic/index.js#provisionAnalystApiKey). Loaded from the same
+    // file an admin would otherwise paste into POST /_security/api_key by hand,
+    // so the manual and automatic paths can never drift apart
     analystRoleDescriptors: requireJson(
       s('elastic.analyst_role_descriptors_path', 'ANALYST_ROLE_DESCRIPTORS_PATH', str, null)
     ),
@@ -171,7 +224,7 @@ module.exports = {
 
   // ---------------------------------------------------------------
   // LOGGING
-  // Everything logs through src/util/logger.js. Secrets are redacted
+  // Everything logs through src/core/util/logger.js. Secrets are redacted
   // from log records regardless of these settings
   // ---------------------------------------------------------------
   logging: {
@@ -212,9 +265,17 @@ module.exports = {
      */
     userStorePath: s('security.user_store_path', 'USER_STORE_PATH', str, './data/users.json'),
     statePath: s('security.state_path', 'STATE_PATH', str, './data/state.json'),
-    // Posted incidents: message coordinates, which alerts are on which case,
-    // and the create-case claim. Holds no credentials, but losing it means
-    // every open incident forgets its case and offers a green button again
+
+    /*
+     * Posted incidents: message coordinates, which alerts are on which case,
+     * and the create-case claim.
+     *
+     * This path is CORE's even though the store itself is now owned by the cases
+     * feature, and that is deliberate: it sits with the other two data/ paths so
+     * an operator relocating the data directory changes three adjacent lines
+     * rather than hunting one of them down inside a feature. The cases feature
+     * reads it from here.
+     */
     incidentStorePath: s(
       'security.incident_store_path', 'INCIDENT_STORE_PATH', str, './data/incidents.json'
     ),
@@ -225,192 +286,17 @@ module.exports = {
      * analyst copy-pasting a key out of Kibana. Empty (the default) disables
      * the option for everyone.
      *
-     * This is Slack-side gating only. Elasticsearch separately
-     * enforces that whatever admin credential someone pastes into that option
-     * actually holds manage_api_key / manage_own_api_key
+     * VERIFY THIS LINE against your current file before committing - it is the
+     * one setting whose exact yaml key and env var I could not read in full.
      */
-    autoProvisionSlackIds: s(
-      'security.auto_provision_slack_ids', 'AUTO_PROVISION_SLACK_IDS', list, []
+    autoProvisionUsers: s(
+      'security.auto_provision_users', 'AUTO_PROVISION_SLACK_USERS', list, []
     ),
-  },
-
-  // ---------------------------------------------------------------
-  // GROUPING
-  // A burst of alerts from one user on one host is one incident
-  // ---------------------------------------------------------------
-  grouping: {
-    // Window measured from the FIRST alert in a cluster, not the previous one
-    windowMs: s('grouping.window_ms', 'GROUP_WINDOW_MS', int, 3600000),
-    // Pass 2: fold machine-identity clusters into the human cluster they overlap
-    mergeMachineUsers: s('grouping.merge_machine_users', 'GROUP_MERGE_MACHINE_USERS', bool, true),
-    // Ceiling on how many alerts get folded into one case
-    maxAlertsPerCase: s('grouping.max_alerts', 'GROUP_MAX_ALERTS', int, 200),
-    /*
-     * Identities treated as machine rather than human. Globs allowed.
-     * It is the one setting here that is specific to each environment's naming
-     * conventions. The default list is a reasonable starting point
-     */
-    machineUsers: s('grouping.machine_users', 'GROUP_MACHINE_USERS', list, [
-      'SYSTEM', 'LOCAL SERVICE', 'NETWORK SERVICE', 'LOCAL SYSTEM', 'ANONYMOUS LOGON',
-      'root', 'daemon', 'nobody', 'svc_*', 'svc-*', 'sa_*', '_*',
-    ]),
-  },
-
-  // ---------------------------------------------------------------
-  // INCIDENTS
-  // How long a posted incident stays live and updatable. This is what lets a
-  // burst spread across many poll ticks stay as one Slack message with one case
-  // ---------------------------------------------------------------
-  incidents: {
-    // No new alerts for this long and the record is reaped. The next alert on
-    // that host starts a fresh incident with a green Create case button, so
-    // pick something like a shift length rather than something short
-    idleMs: s('incidents.idle_ms', 'INCIDENT_IDLE_MS', int, 8 * 3600000),
-    // Hard ceiling regardless of activity
-    maxLifetimeMs: s('incidents.max_lifetime_ms', 'INCIDENT_MAX_LIFETIME_MS', int, 24 * 3600000),
-    // How long a create-case claim is honoured before it's treated as abandoned.
-    // Long enough to cover the Elastic round trips, short enough that a handler
-    // dying mid-click doesn't wedge the incident for the rest of the shift
-    claimTtlMs: s('incidents.claim_ttl_ms', 'INCIDENT_CLAIM_TTL_MS', int, 60000),
-  },
-
-  naming: {
-    // Truncate the rule name in a case title to N words. Unset = use it whole
-    truncateRuleWords: s('naming.rule_words', 'CASE_TITLE_RULE_WORDS', int, null),
-    timeZone:
-      s('naming.timezone', 'CASE_TITLE_TIMEZONE', str, undefined) ||
-      s('stats.timezone', 'STATS_TIMEZONE', str, 'UTC'),
-  },
-
-  stats: {
-    // Lookback used by /stats when the analyst doesn't pass one (e.g. '24h', '7d', '2w')
-    defaultWindow: s('stats.default_window', 'STATS_DEFAULT_WINDOW', str, '7d'),
-    // Hard cap on how far back /stats will look
-    maxWindowDays: s('stats.max_window_days', 'STATS_MAX_WINDOW_DAYS', int, 90),
-    // Timezone used to bucket alerts into hours/weekdays. 'UTC' or an IANA name
-    timeZone: s('stats.timezone', 'STATS_TIMEZONE', str, 'UTC'),
-    // How many entries each "top N" list shows
-    topN: s('stats.top_n', 'STATS_TOP_N', int, 10),
-    // Minimum alerts before a rule can appear in the "noisiest" list
-    noiseMinAlerts: s('stats.noise_min_alerts', 'STATS_NOISE_MIN_ALERTS', int, 10),
-    // Field holding the process/program name. Override if your alerts use a
-    // different mapping (e.g. 'process.executable'). Validated at boot
-    processField: s('stats.process_field', 'STATS_PROCESS_FIELD', str, 'process.name'),
-  },
-
-  watchers: {
-    enabled: s('watchers.enabled', 'WATCHERS_ENABLED', bool, true),
-    pollIntervalMs: s('watchers.poll_ms', 'WATCH_POLL_MS', int, 60000),
-    // Randomise each interval by +/- this fraction, so two replicas started by
-    // the same deploy don't hit Elastic in lockstep forever
-    jitterRatio: s('watchers.jitter_ratio', 'WATCH_JITTER_RATIO', num, 0.1),
-    // How many new alerts to pull per poll - keep above a plausible burst size so a
-    // spike is grouped in one pass instead of split across polls
-    fetchSize: s('watchers.fetch_size', 'WATCH_FETCH_SIZE', int, 200),
-    // Delay between channel posts within a tick, to stay under Slack rate limits
-    postDelayMs: s('watchers.post_delay_ms', 'WATCH_POST_DELAY_MS', int, 300),
-
-    // ---------------------------------------------------------------
-    // CHANNEL ROUTING
-    // Map an Elastic space ID to the Slack channel ID that should receive
-    // its new alerts and cases. Anything unmatched goes to default_channel.
-    // ---------------------------------------------------------------
-    defaultChannel: s('watchers.default_channel', 'DEFAULT_CHANNEL', str, ''),
-    channelRouting: s('watchers.channel_routing', null, map, {}),
-
-    alerts: {
-      enabled: s('watchers.alerts.enabled', 'WATCH_ALERTS_ENABLED', bool, true),
-    },
-    cases: {
-      enabled: s('watchers.cases.enabled', 'WATCH_CASES_ENABLED', bool, true),
-      // Cases are polled per-space via the Kibana Cases API. List the space IDs
-      // you want watched here
-      spaces: s('watchers.cases.spaces', 'WATCH_CASE_SPACES', list, ['default']),
-      // Page size for the Cases _find call
-      perPage: s('watchers.cases.per_page', 'WATCH_CASES_PER_PAGE', int, 25),
-    },
-  },
-  
-  // ---------------------------------------------------------------
-  // SIGMA
-  // The rule database `npm run update-sigmaDB` builds, and the /sigma command
-  // that reads it. Nothing here is needed unless you use that feature
-  // ---------------------------------------------------------------
-  sigma: {
-    // --- where the rules come from ---
-    repoUrl: s('sigma.repo_url', 'SIGMA_REPO_URL', str, 'https://github.com/SigmaHQ/sigma.git'),
-    repoRef: s('sigma.repo_ref', 'SIGMA_REPO_REF', str, 'master'),
-    // Cloned shallow. Gitignored alongside the rest of data/
-    repoPath: s('sigma.repo_path', 'SIGMA_REPO_PATH', str, './data/sigma-repo'),
-    // Subdirectories of the repo to walk. The emerging-threats and
-    // threat-hunting sets are noisier than the core rules - drop them here if
-    // you don't want them offered
-    ruleDirs: s('sigma.rule_dirs', 'SIGMA_RULE_DIRS', list, [
-      'rules',
-      'rules-emerging-threats',
-      'rules-threat-hunting',
-    ]),
-
-    // --- conversion ---
-    // The virtualenv sigma-cli is installed into, created on first run
-    venvPath: s('sigma.venv_path', 'SIGMA_VENV_PATH', str, './data/sigvenv'),
-    pythonBin: s('sigma.python', 'SIGMA_PYTHON', str, 'python3'),
-    /*
-     * The conversion TARGET, and the PLUGIN that provides it. These are not the
-     * same thing and are only occasionally the same word: `lucene` comes from
-     * the `elasticsearch` plugin, while `splunk` happens to be both. Installing
-     * a plugin called `lucene` fails with "Plugin with identifier lucene not
-     * found" - see `sigma plugin list`
-     */
-    backend: s('sigma.backend', 'SIGMA_BACKEND', str, 'lucene'),
-    plugin: s('sigma.plugin', 'SIGMA_PLUGIN', str, 'elasticsearch'),
-    pipeline: s('sigma.pipeline', 'SIGMA_PIPELINE', str, 'ecs_windows'),
-    format: s('sigma.format', 'SIGMA_FORMAT', str, 'siem_rule_ndjson'),
-    // Rules per `sigma convert` process. Bigger is faster; a batch containing
-    // an unsupported rule is retried file-by-file, so it is not a correctness
-    // knob
-    convertBatchSize: s('sigma.convert_batch', 'SIGMA_CONVERT_BATCH', int, 200),
-    // Ceiling on any one git / pip / sigma / prisma invocation
-    commandTimeoutMs: s('sigma.command_timeout_ms', 'SIGMA_COMMAND_TIMEOUT_MS', int, 900000),
-
-    /*
-     * The SQLite file, as a Prisma datasource url.
-     *
-     * Resolved to an absolute path here on purpose. Prisma resolves a relative
-     * sqlite path against the SCHEMA directory while the app would resolve it
-     * against the working directory - two different files for one string, and
-     * the failure mode is a database that syncs fine and reads back empty
-     */
-    databaseUrl: s(
-      'sigma.database_url',
-      'SIGMA_DATABASE_URL',
-      str,
-      `file:${require('path').resolve(process.cwd(), 'data/sigma.db')}`
-    ),
-
-    // --- /sigma behaviour ---
-    // Results per Slack message. A message caps at 50 blocks and each result
-    // costs two, so much above 20 stops rendering
-    pageSize: s('sigma.page_size', 'SIGMA_PAGE_SIZE', int, 10),
-    // How long a paged result set stays clickable. It is a snapshot of a
-    // cluster that keeps moving, so this is deliberately short
-    sessionTtlMs: s('sigma.session_ttl_ms', 'SIGMA_SESSION_TTL_MS', int, 900000),
-    maxSessions: s('sigma.max_sessions', 'SIGMA_MAX_SESSIONS', int, 200),
-    // Cap on /sigma search results before paging
-    maxSearchResults: s('sigma.max_search_results', 'SIGMA_MAX_SEARCH_RESULTS', int, 200),
-    // Page size for the detection-rule _find sweep, and the circuit breaker on
-    // how far /sigma update will walk a large stack
-    stackPageSize: s('sigma.stack_page_size', 'SIGMA_STACK_PAGE_SIZE', int, 100),
-    maxStackRules: s('sigma.max_stack_rules', 'SIGMA_MAX_STACK_RULES', int, 5000),
-
-    /*
-     * Whether a rule added by /sigma search starts enabled.
-     *
-     * Defaults to false. A freshly converted rule has never run against this
-     * environment's data and its index patterns are whatever the pipeline
-     * guessed - enabling it sight unseen is how a channel gets a thousand
-     * alerts overnight
-     */
-    enableNewRules: s('sigma.enable_new_rules', 'SIGMA_ENABLE_NEW_RULES', bool, false),
   },
 };
+
+/*
+ * Features last. loadFeatureConfig has already refused any namespace core owns,
+ * so this assign cannot clobber anything above it.
+ */
+module.exports = Object.assign(core, featureConfig.namespaces);

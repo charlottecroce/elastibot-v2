@@ -1,10 +1,9 @@
 'use strict';
 
-const config = require('../../config');
-const { newCaseBlocks } = require('../../../format');
-const { caseUrl } = require('../../../core/kibanaLinks');
-const { STATE_KEYS } = require('../../../core/constants');
-const { sleep } = require('../../../core/util/sleep');
+const config = require('../../../../config');
+const { STATE_KEYS } = require('../constants');
+const { newCaseBlocks } = require('../caseBlocks');
+const { caseUrl } = require('../../../core/services/kibanaLinks');
 const { logger } = require('../../../core/util/logger');
 
 /*

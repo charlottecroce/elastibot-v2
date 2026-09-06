@@ -1,12 +1,25 @@
 'use strict';
 
-const config = require('../../config');
-const { esc, fenceSafe, fenceSafeToken, mrkdwnLink, ruleBreakdown } = require('./core/util/mrkdwn');
+const {
+  esc,
+  fenceSafeToken,
+  mrkdwnLink,
+  ruleBreakdown,
+} = require('../../core/util/mrkdwn');
 
 /*
- * Slack message builders.
+ * The case-related Slack messages: the confirmation after a case is created,
+ * after an alert is added to one, and the watcher's new-case notification.
+ *
+ * The other half of the old services/format.js - the /stats table helpers and
+ * statsBlocks - went to features/stats/statsBlocks.js. The two halves never
+ * shared a function, which is what made the split clean.
+ *
+ * Anything rendered inside a ``` fence goes through fenceSafe/fenceSafeToken
+ * (core/util/mrkdwn), not esc: Slack does not interpret mrkdwn in a fence, so
+ * the hazard is a stray backtick closing it early rather than an unescaped
+ * angle bracket.
  */
-
 
 /** Success message after a case is created (single or grouped alerts) */
 function caseCreatedBlocks({

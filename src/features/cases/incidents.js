@@ -1,13 +1,12 @@
 'use strict';
 
 const { randomUUID } = require('crypto');
-const config = require('../../config');
-const { JsonFileStore } = require('./store');
-const { SEVERITY_RANK, UNKNOWN_RULE } = require('../../core/constants');
-const { caseUrl, isAbsoluteHttpUrl } = require('./services/kibanaLinks');
-const { logger } = require('./util/logger');
-
-const log = logger.child({ scope: 'incidents' });
+const config = require('../../../config');
+const { JsonFileStore } = require('../../core/store');
+const { SEVERITY_RANK } = require('./constants');
+const { UNKNOWN_RULE } = require('../../core/constants');
+const { caseUrl, isAbsoluteHttpUrl } = require('../../core/services/kibanaLinks');
+const { logger } = require('../../core/util/logger');
 
 /*
  * The incident store.

@@ -15,9 +15,9 @@
  */
 
 const config = require('../../../../config');
-const { logger } = require('../src/util/logger');
-const db = require('../src/sigma/db');
-const { sync } = require('../src/sigma/ingest');
+const { logger } = require('../../../core/util/logger');
+const db = require('../db');
+const { sync } = require('../ingest');
 
 logger.configure(config.logging);
 

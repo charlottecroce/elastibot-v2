@@ -1,12 +1,10 @@
 'use strict';
 
-const config = require('../../config');
-const { ACTIONS } = require('../../core/constants');
-const { STATE } = require('../sigma/state');
-const { esc, fenceSafe } = require('../../core/util/mrkdwn');
-const { section, context, divider, button, actions, chunk, compact } = require('../../core/slack/blocks');
-const { ruleUrl } = require('../../core/kibanaLinks');
-const { packValue, pageOf } = require('../../core/services/sigmaSession');
+const config = require('../../../config');
+const { esc, fenceSafe, mrkdwnLink } = require('../../core/util/mrkdwn');
+const { ruleUrl } = require('../../core/services/kibanaLinks');
+const { ACTIONS } = require('./actions');
+const { STATE } = require('./state');
 
 /*
  * Block Kit for /sigma. Builders only - nothing here talks to Slack, Elastic or

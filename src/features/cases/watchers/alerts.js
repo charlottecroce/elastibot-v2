@@ -1,11 +1,10 @@
 'use strict';
 
-const config = require('../../config');
-const { CURSOR_FIELD } = require('../../../core/elastic');
-const { incidentMessage } = require('../services/incidentBlocks');
-const { renderIncident } = require('../incidentRender');
+const config = require('../../../../config');
 const { groupAlerts } = require('../grouping');
-const { STATE_KEYS } = require('../../../core/constants');
+const { incidentMessage } = require('../incidentBlocks');
+const { renderIncident } = require('../incidentRender');
+const { STATE_KEYS } = require('../constants');
 const { sleep } = require('../../../core/util/sleep');
 const { logger } = require('../../../core/util/logger');
 

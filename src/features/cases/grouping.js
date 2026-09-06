@@ -1,7 +1,8 @@
 'use strict';
 
 const config = require('../../../config');
-const { UNKNOWN_RULE, SEVERITY_RANK } = require('../../core/constants');
+const { SEVERITY_RANK } = require('./constants');
+const { UNKNOWN_RULE } = require('../../core/constants');
 
 /*
  * Alert grouping

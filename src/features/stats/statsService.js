@@ -1,7 +1,8 @@
 'use strict';
 
-const config = require('../../config');
-const { createElasticClient } = require('../../core/elastic');
+const config = require('../../../config');
+const { getClient } = require('../../core/elastic');
+const { statsEndpoints } = require('./elastic');
 const { UserFacingError, describeAxiosError } = require('../../core/util/errors');
 
 /*
@@ -209,7 +210,7 @@ function shapeStats(raw, query) {
 async function getAlertStatistics(apiKey, text, now = new Date()) {
   // Parsed BEFORE the client is built, so bad input never reaches Elastic
   const query = parseStatsQuery(text, now);
-  const client = createElasticClient(apiKey);
+  const client = statsEndpoints(getClient(apiKey));
 
   let raw;
   try {

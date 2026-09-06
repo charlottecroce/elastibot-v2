@@ -1,8 +1,8 @@
 'use strict';
 
-const { ACTIONS } = require('../constants');
-const { esc, code, fenceSafeToken, mrkdwnLink, ruleBreakdown } = require('../util/mrkdwn');
-const { caseLinkForIncident } = require('./kibanaLinks');
+const { ACTIONS } = require('./constants');
+const { esc, code, fenceSafeToken, mrkdwnLink, ruleBreakdown } = require('../../core/util/mrkdwn');
+const { caseLinkForIncident } = require('../../core/services/kibanaLinks');
 
 /*
  * The incident message, in its three states.

@@ -1,7 +1,7 @@
 'use strict';
 
 const config = require('../../../config');
-const { createPager, packValue, unpackValue: unpack } = require('../util/pager');
+const { createPager, packValue, unpackValue: unpack } = require('../../core/util/pager');
 
 /*
  * /sigma's paged result sets.

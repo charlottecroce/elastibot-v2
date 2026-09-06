@@ -12,23 +12,23 @@ const {
   createStackRule,
   resolveSpaceName,
   getSyncStatus,
-} = require('../services/sigmaService');
+} = require('../sigmaService');
 const {
   spacePickerBlocks,
   updatePageBlocks,
   searchPageBlocks,
   statusBlocks,
   fallbackText,
-} = require('../services/sigmaBlocks');
+} = require('../sigmaBlocks');
 const {
   createSession,
   getSession,
   unpackValue,
   pageOf,
   itemAt,
-} = require('../services/sigmaSession');
-const { isUserFacing } = require('../util/errors');
-const { ACTIONS, COMMANDS } = require('../constants');
+} = require('../sigmaSession');
+const { isUserFacing } = require('../../../core/util/errors');
+const { ACTIONS, COMMAND } = require('../actions');
 
 /*
  * /sigma - reconcile the detection rules in a Kibana space against the local

@@ -1,14 +1,23 @@
 'use strict';
 
-const { getAlertStatistics } = require('../services/statsService');
-const { statsBlocks, STATS_USAGE } = require('../../../core/services/format');
-const { COMMANDS } = require('../../cases/constants');
+const { getAlertStatistics } = require('../statsService');
+const { statsBlocks, STATS_USAGE } = require('../statsBlocks');
+const { COMMANDS } = require('../constants');
 
 /*
  * /stats [window] [filters] [share]
- *   Aggregate view of the alerts index: top/noisiest rules, severity + risk spread, top hosts/users/processes
+ *   Aggregate view of the alerts index: top/noisiest rules, severity + risk
+ *   spread, top hosts/users/processes.
  *
- *   Runs under the analyst's own API key, replies ephemerally by default unless the analyst adds `share`
+ *   Runs under the analyst's own API key, replies ephemerally by default unless
+ *   the analyst adds `share`.
+ *
+ * Three imports changed here and all three were broken:
+ *   ../services/statsService  ->  ../statsService   (no services/ dir any more)
+ *   core/services/format      ->  ../statsBlocks    (format.js was split up)
+ *   ../../cases/constants     ->  ../constants      (a CROSS-FEATURE import for
+ *                                                    the string '/stats', which
+ *                                                    eslint now refuses)
  */
 
 module.exports = function registerStats(reg) {

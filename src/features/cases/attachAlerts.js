@@ -1,7 +1,7 @@
 'use strict';
 
-const config = require('../../config');
-const { describeAxiosError } = require('../util/errors');
+const config = require('../../../config');
+const { describeAxiosError } = require('../../core/util/errors');
 
 /*
  * Attaching alerts to a case, in one place.
@@ -81,6 +81,12 @@ async function attachInRuleBatches(client, { spaceId, caseId, alerts, owner }) {
   return {
     attachedIds,
     failures,
+    /*
+     * CHECK THIS ONE LINE against your copy. The prefix has to stay exactly
+     * "Some alerts didn't attach: " because caseService.js strips it back off
+     * with a literal regex when it builds the every-batch-failed error, and a
+     * changed prefix there degrades that message to "unknown error" silently.
+     */
     warning: failures.length ? `Some alerts didn't attach: ${failures.join('; ')}` : null,
   };
 }

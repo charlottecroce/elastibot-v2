@@ -1,6 +1,6 @@
 'use strict';
 
-const { UNKNOWN_RULE } = require('./constants');
+const { UNKNOWN_RULE } = require('../../core/constants');
 
 /*
  * Case naming scheme:

@@ -1,7 +1,7 @@
 'use strict';
 
-const { addAlertToCase } = require('../services/caseService');
-const { alertAddedBlocks } = require('../../../core/services/format');
+const { addAlertToCase } = require('../caseService');
+const { alertAddedBlocks } = require('../caseBlocks');
 const { COMMANDS } = require('../constants');
 
 /*
